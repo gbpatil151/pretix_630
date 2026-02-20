@@ -30,7 +30,6 @@ from pretix.base.models import Event, Item, Order, OrderPosition, Organizer
 from pretix.base.services.orders import OrderError, approve_order, deny_order
 
 
-
 @pytest.fixture(scope='function')
 def event():
     o = Organizer.objects.create(
