@@ -21,7 +21,6 @@
 #
 import copy
 import datetime
-from unittest import mock
 
 import pytest
 from django_scopes import scopes_disabled

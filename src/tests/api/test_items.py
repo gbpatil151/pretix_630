@@ -35,7 +35,6 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django.conf import settings

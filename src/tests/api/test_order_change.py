@@ -19,10 +19,10 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <https://www.gnu.org/licenses/>.
 #
+import copy
 import datetime
 import json
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django.core import mail as djmail

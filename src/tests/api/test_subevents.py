@@ -21,7 +21,6 @@
 #
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django_countries.fields import Country

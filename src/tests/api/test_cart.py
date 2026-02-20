@@ -22,7 +22,6 @@
 import copy
 import datetime
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django.core.files.base import ContentFile

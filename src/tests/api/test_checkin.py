@@ -22,7 +22,6 @@
 import datetime
 import time
 from decimal import Decimal
-from unittest import mock
 from urllib.parse import quote as urlquote
 
 import pytest
