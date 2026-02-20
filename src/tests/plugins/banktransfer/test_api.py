@@ -27,6 +27,7 @@ from unittest import mock
 import pytest
 from django.utils.timezone import now
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 
 from pretix.base.models import (
     Event, Item, Order, OrderPosition, Organizer, Quota, Team, User,
@@ -92,15 +93,13 @@ RES_JOB = {
 
 
 @pytest.mark.django_db
+@freeze_time("2017-12-01 10:00:00+00:00")
 def test_api_list(env, client):
     testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        job = BankImportJob.objects.create(event=env[0], organizer=env[0].organizer, currency='EUR')
-        BankTransaction.objects.create(event=env[0], import_job=job, payer='Foo',
-                                       state=BankTransaction.STATE_ERROR,
-                                       amount=0, date='unknown', currency='EUR')
+    job = BankImportJob.objects.create(event=env[0], organizer=env[0].organizer, currency='EUR')
+    BankTransaction.objects.create(event=env[0], import_job=job, payer='Foo',
+                                   state=BankTransaction.STATE_ERROR,
+                                   amount=0, date='unknown', currency='EUR')
     res = copy.copy(RES_JOB)
     res['id'] = job.pk
     res['created'] = testtime.isoformat().replace('+00:00', 'Z')
@@ -112,15 +111,13 @@ def test_api_list(env, client):
 
 
 @pytest.mark.django_db
+@freeze_time("2017-12-01 10:00:00+00:00")
 def test_api_detail(env, client):
     testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        job = BankImportJob.objects.create(event=env[0], organizer=env[0].organizer, currency='EUR')
-        BankTransaction.objects.create(event=env[0], import_job=job, payer='Foo',
-                                       state=BankTransaction.STATE_ERROR,
-                                       amount=0, date='unknown', currency='EUR')
+    job = BankImportJob.objects.create(event=env[0], organizer=env[0].organizer, currency='EUR')
+    BankTransaction.objects.create(event=env[0], import_job=job, payer='Foo',
+                                   state=BankTransaction.STATE_ERROR,
+                                   amount=0, date='unknown', currency='EUR')
     res = copy.copy(RES_JOB)
     res['id'] = job.pk
     res['created'] = testtime.isoformat().replace('+00:00', 'Z')

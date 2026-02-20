@@ -42,6 +42,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django_countries.fields import Country
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 from tests.const import SAMPLE_PNG
 
 from pretix.base.models import (
@@ -72,23 +73,20 @@ def category3(event, item):
 
 
 @pytest.fixture
+@freeze_time("2017-12-01 10:00:00+00:00")
 def order(event, item, taxrule):
-    testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        o = Order.objects.create(
-            code='FOO', event=event, email='dummy@dummy.test',
-            status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
-            datetime=datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc),
-            expires=datetime(2017, 12, 10, 10, 0, 0, tzinfo=timezone.utc),
-            sales_channel=event.organizer.sales_channels.get(identifier="web"),
-            total=23, locale='en'
-        )
-        o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
-                      tax_value=Decimal('0.05'), tax_rule=taxrule)
-        InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
-        return o
+    o = Order.objects.create(
+        code='FOO', event=event, email='dummy@dummy.test',
+        status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
+        datetime=datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc),
+        expires=datetime(2017, 12, 10, 10, 0, 0, tzinfo=timezone.utc),
+        sales_channel=event.organizer.sales_channels.get(identifier="web"),
+        total=23, locale='en'
+    )
+    o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
+                  tax_value=Decimal('0.05'), tax_rule=taxrule)
+    InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
+    return o
 
 
 @pytest.fixture
@@ -108,21 +106,19 @@ def order_position(item, order, taxrule, variations):
 
 
 @pytest.fixture
+@freeze_time("2017-12-01 10:00:00+00:00")
 def cart_position(event, item, variations):
     testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        c = CartPosition.objects.create(
-            event=event,
-            item=item,
-            datetime=testtime,
-            expires=testtime + timedelta(days=1),
-            variation=variations[0],
-            price=Decimal("23"),
-            cart_id="z3fsn8jyufm5kpk768q69gkbyr5f4h6w"
-        )
-        return c
+    c = CartPosition.objects.create(
+        event=event,
+        item=item,
+        datetime=testtime,
+        expires=testtime + timedelta(days=1),
+        variation=variations[0],
+        price=Decimal("23"),
+        cart_id="z3fsn8jyufm5kpk768q69gkbyr5f4h6w"
+    )
+    return c
 
 
 TEST_CATEGORY_RES = {

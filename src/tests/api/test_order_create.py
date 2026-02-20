@@ -32,6 +32,7 @@ from django.core.files.base import ContentFile
 from django.utils.timezone import now
 from django_countries.fields import Country
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 from tests.const import SAMPLE_PNG
 
 from pretix.base.models import (
@@ -100,69 +101,68 @@ def quota(event, item):
 
 
 @pytest.fixture
+@freeze_time("2017-12-01 10:00:00+00:00")
 def order(event, item, taxrule, question):
-    testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
     event.plugins += ",pretix.plugins.stripe"
     event.save()
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        o = Order.objects.create(
-            code='FOO', event=event, email='dummy@dummy.test',
-            status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
-            datetime=datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc),
-            expires=datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc),
-            sales_channel=event.organizer.sales_channels.get(identifier="web"),
-            total=23, locale='en'
-        )
-        p1 = o.payments.create(
-            provider='stripe',
-            state='refunded',
-            amount=Decimal('23.00'),
-            payment_date=testtime,
-        )
-        o.refunds.create(
-            provider='stripe',
-            state='done',
-            source='admin',
-            amount=Decimal('23.00'),
-            execution_date=testtime,
-            payment=p1,
-        )
-        o.payments.create(
-            provider='banktransfer',
-            state='pending',
-            amount=Decimal('23.00'),
-        )
-        o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
-                      tax_value=Decimal('0.05'), tax_rule=taxrule)
-        o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
-                      tax_value=Decimal('0.05'), tax_rule=taxrule, canceled=True)
-        InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'),
-                                      vat_id="DE123", vat_id_validated=True)
-        op = OrderPosition.objects.create(
-            order=o,
-            item=item,
-            variation=None,
-            price=Decimal("23"),
-            attendee_name_parts={"full_name": "Peter", "_scheme": "full"},
-            secret="z3fsn8jyufm5kpk768q69gkbyr5f4h6w",
-            pseudonymization_id="ABCDEFGHKL",
-            positionid=1,
-        )
-        OrderPosition.objects.create(
-            order=o,
-            item=item,
-            variation=None,
-            price=Decimal("23"),
-            attendee_name_parts={"full_name": "Peter", "_scheme": "full"},
-            secret="YBiYJrmF5ufiTLdV1iDf",
-            pseudonymization_id="JKLM",
-            canceled=True,
-            positionid=2,
-        )
-        op.answers.create(question=question, answer='S')
-        return o
+    o = Order.objects.create(
+        code='FOO', event=event, email='dummy@dummy.test',
+        status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
+        datetime=datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc),
+        expires=datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc),
+        sales_channel=event.organizer.sales_channels.get(identifier="web"),
+        total=23, locale='en'
+    )
+    testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+    p1 = o.payments.create(
+        provider='stripe',
+        state='refunded',
+        amount=Decimal('23.00'),
+        payment_date=testtime,
+    )
+    o.refunds.create(
+        provider='stripe',
+        state='done',
+        source='admin',
+        amount=Decimal('23.00'),
+        execution_date=testtime,
+        payment=p1,
+    )
+    o.payments.create(
+        provider='banktransfer',
+        state='pending',
+        amount=Decimal('23.00'),
+    )
+    o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
+                  tax_value=Decimal('0.05'), tax_rule=taxrule)
+    o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
+                  tax_value=Decimal('0.05'), tax_rule=taxrule, canceled=True)
+    InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'),
+                                  vat_id="DE123", vat_id_validated=True)
+    op = OrderPosition.objects.create(
+        order=o,
+        item=item,
+        variation=None,
+        price=Decimal("23"),
+        attendee_name_parts={"full_name": "Peter", "_scheme": "full"},
+        secret="z3fsn8jyufm5kpk768q69gkbyr5f4h6w",
+        pseudonymization_id="ABCDEFGHKL",
+        positionid=1,
+    )
+    OrderPosition.objects.create(
+        order=o,
+        item=item,
+        variation=None,
+        price=Decimal("23"),
+        attendee_name_parts={"full_name": "Peter", "_scheme": "full"},
+        secret="YBiYJrmF5ufiTLdV1iDf",
+        pseudonymization_id="JKLM",
+        canceled=True,
+        positionid=2,
+    )
+    op.answers.create(question=question, answer='S')
+    return o
 
 
 ORDER_CREATE_PAYLOAD = {
