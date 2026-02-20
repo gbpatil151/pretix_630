@@ -1,3 +1,24 @@
+#
+# This file is part of pretix (Community Edition).
+#
+# Copyright (C) 2014-2020  Raphael Michel and contributors
+# Copyright (C) 2020-today pretix GmbH and contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+# Public License as published by the Free Software Foundation in version 3 of the License.
+#
+# ADDITIONAL TERMS APPLY: Pursuant to Section 7 of the GNU Affero General Public License, additional terms are
+# applicable granting you additional permissions and placing additional restrictions on your usage of this software.
+# Please refer to the pretix LICENSE file to obtain the full terms applicable to this work. If you did not receive
+# this file, see <https://pretix.eu/about/en/license>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
+# <https://www.gnu.org/licenses/>.
+#
 import datetime
 import tracemalloc
 from decimal import Decimal
@@ -8,9 +29,9 @@ from django_scopes import scope, scopes_disabled
 
 from pretix.base.exporters.orderlist import OrderListExporter
 from pretix.base.models import (
-    Event, Item, Order, OrderPosition, Organizer, Quota, Team, User,
+    Event, Order, OrderPosition, Organizer, User,
 )
-from pretix.base.models.orders import OrderFee, OrderPayment
+from pretix.base.models.orders import OrderPayment
 
 
 @pytest.fixture(scope='function')
@@ -122,7 +143,6 @@ def test_export_completes_for_large_dataset(event, item, quota, user):
             continue
         rows.append(line)
 
-    header = rows[0]
     data_rows = rows[1:]
     assert len(data_rows) == order_count, (
         f"Expected {order_count} data rows, got {len(data_rows)}"
@@ -182,7 +202,6 @@ def test_export_positions_sheet_large_dataset(event, item, quota, user):
             continue
         rows.append(line)
 
-    header = rows[0]
     data_rows = rows[1:]
     assert len(data_rows) == order_count, (
         f"Expected {order_count} position rows, got {len(data_rows)}"
@@ -210,7 +229,6 @@ def test_export_fees_sheet_empty_gracefully(event, item, quota, user):
             continue
         rows.append(line)
 
-    header = rows[0]
     data_rows = rows[1:]
     assert len(data_rows) == 0
 
