@@ -42,6 +42,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django_countries.fields import Country
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 from tests.const import SAMPLE_PNG
 
 from pretix.base.models import (
@@ -75,8 +76,7 @@ def category3(event, item):
 def order(event, item, taxrule):
     testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='FOO', event=event, email='dummy@dummy.test',
             status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
@@ -111,8 +111,7 @@ def order_position(item, order, taxrule, variations):
 def cart_position(event, item, variations):
     testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         c = CartPosition.objects.create(
             event=event,
             item=item,

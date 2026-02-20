@@ -30,6 +30,7 @@ from django.core.files.base import ContentFile
 from django.utils.timezone import now
 from django_countries.fields import Country
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 from i18nfield.strings import LazyI18nString
 from tests.const import SAMPLE_PNG
 
@@ -58,8 +59,7 @@ def other_item(event):
 def order(event, item, other_item, taxrule):
     testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='FOO', event=event, email='dummy@dummy.test',
             status=Order.STATUS_PAID, secret="k24fiuwvu8kxz3y1",

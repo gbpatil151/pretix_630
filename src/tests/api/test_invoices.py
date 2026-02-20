@@ -27,6 +27,7 @@ import freezegun
 import pytest
 from django_countries.fields import Country
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 
 from pretix.base.models import Invoice, InvoiceAddress, Order, OrderPosition
 from pretix.base.models.orders import OrderFee
@@ -78,8 +79,7 @@ def order(event, item, taxrule, question):
     event.plugins += ",pretix.plugins.stripe"
     event.save()
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='FOO', event=event, email='dummy@dummy.test',
             status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
@@ -142,8 +142,7 @@ def order(event, item, taxrule, question):
 def order2(event2, item2):
     testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='BAR', event=event2, email='dummy@dummy.test',
             status=Order.STATUS_PENDING, secret="asd436cvbfd1",
@@ -174,8 +173,7 @@ def order2(event2, item2):
 def invoice(order):
     testtime = datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         return generate_invoice(order)
 
 
@@ -183,8 +181,7 @@ def invoice(order):
 def invoice2(order2):
     testtime = datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         return generate_invoice(order2)
 
 

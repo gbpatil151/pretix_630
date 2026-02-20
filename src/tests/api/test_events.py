@@ -43,6 +43,7 @@ from django.core.files.base import ContentFile
 from django.utils.timezone import now
 from django_countries.fields import Country
 from django_scopes import scope, scopes_disabled
+from freezegun import freeze_time
 from tests.const import SAMPLE_PNG
 
 from pretix.base.models import (
@@ -64,8 +65,7 @@ def variations(item):
 def order(event, item, taxrule):
     testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='FOO', event=event, email='dummy@dummy.test',
             status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
