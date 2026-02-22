@@ -34,6 +34,7 @@
 
 import os
 import re
+from datetime import timedelta
 from email.mime.text import MIMEText
 
 import pytest
@@ -46,7 +47,7 @@ from django_scopes import scope
 from i18nfield.strings import LazyI18nString
 
 from pretix.base.email import get_email_context
-from pretix.base.models import Event, Organizer, OutgoingMail, User
+from pretix.base.models import Event, Order, Organizer, OutgoingMail, User
 from pretix.base.services.mail import mail, mail_send_task
 
 
@@ -377,3 +378,54 @@ def test_placeholder_html_rendering_from_string(env):
         r'style="[^"]+" target="_blank">Link &amp; Text</a>',
         html
     )
+
+
+@pytest.mark.django_db
+def test_placeholder_html_rendering_invalid_placeholder(env):
+    djmail.outbox = []
+    event, user, organizer = env
+    template = LazyI18nString({
+        "en": "Event name: {event}\n\nInvalid: {invalid_placeholder_name}\n\n"
+    })
+    ctx = get_email_context(
+        event=event,
+    )
+    mail('dummy@dummy.dummy', '{event} Test subject {invalid_placeholder_name}', template, ctx, event)
+
+    assert len(djmail.outbox) == 1
+    assert djmail.outbox[0].to == [user.email]
+
+    # We just want to ensure it doesn't crash and the missing placeholder is either preserved or rendered harmlessly.
+    # We will assert the basic content is there.
+    assert 'Event name: Dummy' in djmail.outbox[0].body
+    html = _extract_html(djmail.outbox[0])
+    assert 'Event name: Dummy' in html
+
+
+@pytest.mark.django_db
+def test_placeholder_html_rendering_with_order(env):
+    djmail.outbox = []
+    event, user, organizer = env
+
+    order = Order.objects.create(
+        code='FOOBAR', event=event, email='dummy@dummy.test',
+        status=Order.STATUS_PENDING,
+        datetime=now(), expires=now() + timedelta(days=10),
+        total=10, require_approval=False, locale='en',
+        sales_channel=event.organizer.sales_channels.get(identifier="web"),
+    )
+    template = LazyI18nString({
+        "en": "Event name: {event}\n\nOrder code: {code}\n\n"
+    })
+    ctx = get_email_context(
+        event=event,
+        order=order
+    )
+    mail('dummy@dummy.test', '{event} Test subject {code}', template, ctx, event, order=order)
+
+    assert len(djmail.outbox) == 1
+    assert 'Event name: Dummy' in djmail.outbox[0].body
+    assert 'Order code: FOOBAR' in djmail.outbox[0].body
+    html = _extract_html(djmail.outbox[0])
+    assert 'Event name: Dummy' in html
+    assert 'Order code: FOOBAR' in html
