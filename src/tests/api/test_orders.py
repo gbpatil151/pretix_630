@@ -2037,3 +2037,96 @@ def test_pdf_data(token_client, organizer, event, order, django_assert_max_num_q
     ))
     assert resp.status_code == 200
     assert not resp.data.get('pdf_data')
+
+
+# ---------------------------------------------------------------------------
+# Edge-case regression tests (Issue #3)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_order_cancel_already_canceled_returns_400(token_client, organizer, event, order):
+    """Canceling an order that is already canceled must return HTTP 400, not 500."""
+    # First cancel legitimately
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/{}/cancel/'.format(
+            organizer.slug, event.slug, order.code
+        ),
+        data={}, format='json'
+    )
+    assert resp.status_code == 200
+    with scopes_disabled():
+        order.refresh_from_db()
+    assert order.status == Order.STATUS_CANCELED
+
+    # Try to cancel again — should be rejected
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/{}/cancel/'.format(
+            organizer.slug, event.slug, order.code
+        ),
+        data={}, format='json'
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_order_refund_exceeds_paid_amount_returns_400(token_client, organizer, event, order):
+    """Creating a refund larger than what was paid must return HTTP 400."""
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/{}/refunds/'.format(
+            organizer.slug, event.slug, order.code
+        ),
+        data={
+            'payment': None,
+            'provider': 'banktransfer',
+            'amount': '9999.00',
+            'mark_canceled': False,
+        },
+        format='json'
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_order_mark_paid_twice_returns_400(token_client, organizer, event, order):
+    """Marking a pending order as paid twice must not succeed on the second attempt."""
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/{}/mark_paid/'.format(
+            organizer.slug, event.slug, order.code
+        ),
+        data={}, format='json'
+    )
+    assert resp.status_code == 200
+    with scopes_disabled():
+        order.refresh_from_db()
+    assert order.status == Order.STATUS_PAID
+
+    # Mark paid again
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/{}/mark_paid/'.format(
+            organizer.slug, event.slug, order.code
+        ),
+        data={}, format='json'
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_order_list_filter_by_status(token_client, organizer, event, order):
+    """Order list filtered by status=n must only return PENDING orders."""
+    with scopes_disabled():
+        order.status = Order.STATUS_PAID
+        order.save()
+
+    resp = token_client.get(
+        '/api/v1/organizers/{}/events/{}/orders/?status=n'.format(organizer.slug, event.slug)
+    )
+    assert resp.status_code == 200
+    # no pending orders exist — list must be empty
+    assert resp.data['count'] == 0
+
+    resp = token_client.get(
+        '/api/v1/organizers/{}/events/{}/orders/?status=p'.format(organizer.slug, event.slug)
+    )
+    assert resp.status_code == 200
+    assert resp.data['count'] == 1
+    assert resp.data['results'][0]['code'] == order.code
