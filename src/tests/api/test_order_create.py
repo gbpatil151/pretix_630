@@ -3336,3 +3336,90 @@ def test_order_create_rounding_default_pretixpos_fallback(device, device_client,
     assert resp.data["total"] == "500.00"
     assert resp.data["positions"][0]["price"] == "100.00"
     assert resp.data["positions"][-1]["price"] == "100.00"
+
+
+@pytest.mark.django_db
+def test_order_create_empty_positions(token_client, organizer, event, item, quota, question):
+    """Order with no line items must be rejected."""
+    res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
+    res['positions'] = []
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
+        format='json', data=res
+    )
+    assert resp.status_code == 400
+    assert 'positions' in resp.data
+
+
+@pytest.mark.django_db
+def test_order_create_negative_position_price(token_client, organizer, event, item, quota, question):
+    """A position with a negative price must be rejected."""
+    res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
+    res['positions'][0]['item'] = item.pk
+    res['positions'][0]['answers'][0]['question'] = question.pk
+    res['positions'][0]['price'] = '-5.00'
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
+        format='json', data=res
+    )
+    assert resp.status_code == 400
+    assert 'positions' in resp.data
+
+
+@pytest.mark.django_db
+def test_order_create_item_wrong_event(token_client, organizer, event, item2, quota, question):
+    """Using an item that belongs to a different event must be rejected."""
+    res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
+    res['positions'][0]['item'] = item2.pk
+    res['positions'][0].pop('answers', None)
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
+        format='json', data=res
+    )
+    assert resp.status_code == 400
+    assert 'positions' in resp.data
+
+
+@pytest.mark.django_db
+def test_order_create_quota_exhausted(token_client, organizer, event, item, question):
+    """Creating an order when the quota is already sold out must be rejected."""
+    quota = event.quotas.create(name="Exhausted Quota", size=0)
+    quota.items.add(item)
+    res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
+    res['positions'][0]['item'] = item.pk
+    res['positions'][0]['answers'][0]['question'] = question.pk
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
+        format='json', data=res
+    )
+    assert resp.status_code == 400
+    assert 'positions' in resp.data
+
+
+@pytest.mark.django_db
+def test_order_create_missing_email(token_client, organizer, event, item, quota, question):
+    """Order without an email address must be rejected."""
+    res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
+    res['positions'][0]['item'] = item.pk
+    res['positions'][0]['answers'][0]['question'] = question.pk
+    del res['email']
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
+        format='json', data=res
+    )
+    assert resp.status_code == 400
+    assert 'email' in resp.data
+
+
+@pytest.mark.django_db
+def test_order_create_invalid_item_id(token_client, organizer, event, quota, question):
+    """Referencing a non-existent item ID must be rejected."""
+    res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
+    res['positions'][0]['item'] = 999999
+    res['positions'][0].pop('answers', None)
+    resp = token_client.post(
+        '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
+        format='json', data=res
+    )
+    assert resp.status_code == 400
+    assert 'positions' in resp.data
