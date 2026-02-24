@@ -3398,7 +3398,7 @@ def test_order_create_quota_exhausted(token_client, organizer, event, item, ques
 
 
 @pytest.mark.django_db
-def test_order_create_invalid_payment_provider(token_client, organizer, event, item, quota, question):
+def test_order_create_unknown_payment_provider(token_client, organizer, event, item, quota, question):
     """An unrecognised payment provider must be rejected."""
     res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
     res['positions'][0]['item'] = item.pk
