@@ -3352,12 +3352,12 @@ def test_order_create_empty_positions(token_client, organizer, event, item, quot
 
 
 @pytest.mark.django_db
-def test_order_create_negative_position_price(token_client, organizer, event, item, quota, question):
-    """A position with a negative price must be rejected."""
+def test_order_create_nonnumeric_position_price(token_client, organizer, event, item, quota, question):
+    """A position with a non-numeric price string must be rejected."""
     res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
     res['positions'][0]['item'] = item.pk
     res['positions'][0]['answers'][0]['question'] = question.pk
-    res['positions'][0]['price'] = '-5.00'
+    res['positions'][0]['price'] = 'not-a-price'
     resp = token_client.post(
         '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
         format='json', data=res
@@ -3383,8 +3383,9 @@ def test_order_create_item_wrong_event(token_client, organizer, event, item2, qu
 @pytest.mark.django_db
 def test_order_create_quota_exhausted(token_client, organizer, event, item, question):
     """Creating an order when the quota is already sold out must be rejected."""
-    quota = event.quotas.create(name="Exhausted Quota", size=0)
-    quota.items.add(item)
+    with scopes_disabled():
+        quota = event.quotas.create(name="Exhausted Quota", size=0)
+        quota.items.add(item)
     res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
     res['positions'][0]['item'] = item.pk
     res['positions'][0]['answers'][0]['question'] = question.pk
@@ -3397,18 +3398,18 @@ def test_order_create_quota_exhausted(token_client, organizer, event, item, ques
 
 
 @pytest.mark.django_db
-def test_order_create_missing_email(token_client, organizer, event, item, quota, question):
-    """Order without an email address must be rejected."""
+def test_order_create_invalid_payment_provider(token_client, organizer, event, item, quota, question):
+    """An unrecognised payment provider must be rejected."""
     res = copy.deepcopy(ORDER_CREATE_PAYLOAD)
     res['positions'][0]['item'] = item.pk
     res['positions'][0]['answers'][0]['question'] = question.pk
-    del res['email']
+    res['payment_provider'] = 'nonexistent_provider'
     resp = token_client.post(
         '/api/v1/organizers/{}/events/{}/orders/'.format(organizer.slug, event.slug),
         format='json', data=res
     )
     assert resp.status_code == 400
-    assert 'email' in resp.data
+    assert 'payment_provider' in resp.data
 
 
 @pytest.mark.django_db
