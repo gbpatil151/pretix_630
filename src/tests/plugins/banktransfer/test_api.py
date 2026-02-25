@@ -22,7 +22,6 @@
 import copy
 import json
 from datetime import datetime, timedelta, timezone
-from unittest import mock
 
 import pytest
 from django.utils.timezone import now

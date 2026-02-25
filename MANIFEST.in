@@ -1,6 +1,7 @@
 include LICENSE
 include README.rst
 include src/Makefile
+recursive-include docs *.md
 include _build/backend.py
 global-include *.proto
 recursive-include src/pretix/static *

@@ -23,7 +23,6 @@ import copy
 import datetime
 import json
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django.conf import settings
