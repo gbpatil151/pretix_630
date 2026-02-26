@@ -28,12 +28,10 @@ from django.test import override_settings
 from django.utils import translation
 from django_scopes import scopes_disabled
 from fakeredis import FakeConnection
-from xdist.dsession import DSession
 
 from pretix.testutils.mock import get_redis_connection
 
 CRASHED_ITEMS = set()
-
 
 
 @pytest.hookimpl(hookwrapper=True)
