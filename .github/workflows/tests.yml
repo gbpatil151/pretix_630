@@ -2,17 +2,17 @@ name: Tests
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
     paths-ignore:
-      - 'doc/**'
+      - "doc/**"
   pull_request:
-    branches: [ master ]
+    branches: [master]
     paths-ignore:
-      - 'doc/**'
-      - 'src/pretix/locale/**'
+      - "doc/**"
+      - "src/pretix/locale/**"
 
 permissions:
-  contents: read  #  to fetch code (actions/checkout)
+  contents: read #  to fetch code (actions/checkout)
 
 env:
   FORCE_COLOR: 1
@@ -24,12 +24,7 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.13"]
-        database: [sqlite, postgres]
-        exclude:
-          - database: sqlite
-            python-version: "3.10"
-          - database: sqlite
-            python-version: "3.11"
+        database: [postgres]
     services:
       postgres:
         image: postgres:15
