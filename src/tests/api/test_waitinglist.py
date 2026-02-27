@@ -25,6 +25,7 @@ from unittest import mock
 
 import pytest
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 
 from pretix.base.models import WaitingListEntry
 
@@ -42,12 +43,9 @@ def quota(event, item):
 
 
 @pytest.fixture
+@freeze_time("2017-12-01 10:00:00+00:00")
 def wle(event, item):
-    testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        return WaitingListEntry.objects.create(event=event, item=item, email="waiting@example.org", locale="en")
+    return WaitingListEntry.objects.create(event=event, item=item, email="waiting@example.org", locale="en")
 
 
 TEST_WLE_RES = {

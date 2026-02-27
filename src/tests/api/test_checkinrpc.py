@@ -58,89 +58,83 @@ def other_item(event):
 
 
 @pytest.fixture
+@freeze_time("2017-12-01 10:00:00+00:00")
 def order(event, item, other_item, taxrule):
-    testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        o = Order.objects.create(
-            code='FOO', event=event, email='dummy@dummy.test',
-            status=Order.STATUS_PAID, secret="k24fiuwvu8kxz3y1",
-            datetime=datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc),
-            expires=datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc),
-            sales_channel=event.organizer.sales_channels.get(identifier="web"),
-            total=46, locale='en'
-        )
-        InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
-        op1 = OrderPosition.objects.create(
-            order=o,
-            positionid=1,
-            item=item,
-            variation=None,
-            price=Decimal("23"),
-            attendee_name_parts={'full_name': "Peter"},
-            secret="z3fsn8jyufm5kpk768q69gkbyr5f4h6w",
-            pseudonymization_id="ABCDEFGHKL",
-        )
-        OrderPosition.objects.create(
-            order=o,
-            positionid=2,
-            item=other_item,
-            variation=None,
-            price=Decimal("23"),
-            attendee_name_parts={'full_name': "Michael"},
-            secret="sf4HZG73fU6kwddgjg2QOusFbYZwVKpK",
-            pseudonymization_id="BACDEFGHKL",
-        )
-        OrderPosition.objects.create(
-            order=o,
-            positionid=3,
-            item=other_item,
-            addon_to=op1,
-            variation=None,
-            price=Decimal("0"),
-            secret="3u4ez6vrrbgb3wvezxhq446p548dt2wn",
-            pseudonymization_id="FOOBAR12345",
-        )
-        return o
+    o = Order.objects.create(
+        code='FOO', event=event, email='dummy@dummy.test',
+        status=Order.STATUS_PAID, secret="k24fiuwvu8kxz3y1",
+        datetime=datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc),
+        expires=datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc),
+        sales_channel=event.organizer.sales_channels.get(identifier="web"),
+        total=46, locale='en'
+    )
+    InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
+    op1 = OrderPosition.objects.create(
+        order=o,
+        positionid=1,
+        item=item,
+        variation=None,
+        price=Decimal("23"),
+        attendee_name_parts={'full_name': "Peter"},
+        secret="z3fsn8jyufm5kpk768q69gkbyr5f4h6w",
+        pseudonymization_id="ABCDEFGHKL",
+    )
+    OrderPosition.objects.create(
+        order=o,
+        positionid=2,
+        item=other_item,
+        variation=None,
+        price=Decimal("23"),
+        attendee_name_parts={'full_name': "Michael"},
+        secret="sf4HZG73fU6kwddgjg2QOusFbYZwVKpK",
+        pseudonymization_id="BACDEFGHKL",
+    )
+    OrderPosition.objects.create(
+        order=o,
+        positionid=3,
+        item=other_item,
+        addon_to=op1,
+        variation=None,
+        price=Decimal("0"),
+        secret="3u4ez6vrrbgb3wvezxhq446p548dt2wn",
+        pseudonymization_id="FOOBAR12345",
+    )
+    return o
 
 
 @pytest.fixture
+@freeze_time("2017-12-01 10:00:00+00:00")
 def order2(event2, item_on_event2):
-    testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        o = Order.objects.create(
-            code='BAR', event=event2, email='dummy@dummy.test',
-            status=Order.STATUS_PAID, secret="ylptCPNOxTyA",
-            datetime=datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc),
-            expires=datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc),
-            sales_channel=event2.organizer.sales_channels.get(identifier="web"),
-            total=46, locale='en'
-        )
-        InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
-        OrderPosition.objects.create(
-            order=o,
-            positionid=1,
-            item=item_on_event2,
-            variation=None,
-            price=Decimal("23"),
-            attendee_name_parts={'full_name': "John"},
-            secret="y8tPmyc5BEK2G9pifSNumwp4NXAaIE4P",
-            pseudonymization_id="A23456789",
-        )
-        OrderPosition.objects.create(
-            order=o,
-            positionid=2,
-            item=item_on_event2,
-            variation=None,
-            price=Decimal("23"),
-            attendee_name_parts={'full_name': "Paul"},
-            secret="xrahgLCfodoNOIZ4uxn75gNBM1bb6m1h",
-            pseudonymization_id="B23456797345",
-        )
-        return o
+    o = Order.objects.create(
+        code='BAR', event=event2, email='dummy@dummy.test',
+        status=Order.STATUS_PAID, secret="ylptCPNOxTyA",
+        datetime=datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc),
+        expires=datetime.datetime(2017, 12, 10, 10, 0, 0, tzinfo=datetime.timezone.utc),
+        sales_channel=event2.organizer.sales_channels.get(identifier="web"),
+        total=46, locale='en'
+    )
+    InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
+    OrderPosition.objects.create(
+        order=o,
+        positionid=1,
+        item=item_on_event2,
+        variation=None,
+        price=Decimal("23"),
+        attendee_name_parts={'full_name': "John"},
+        secret="y8tPmyc5BEK2G9pifSNumwp4NXAaIE4P",
+        pseudonymization_id="A23456789",
+    )
+    OrderPosition.objects.create(
+        order=o,
+        positionid=2,
+        item=item_on_event2,
+        variation=None,
+        price=Decimal("23"),
+        attendee_name_parts={'full_name': "Paul"},
+        secret="xrahgLCfodoNOIZ4uxn75gNBM1bb6m1h",
+        pseudonymization_id="B23456797345",
+    )
+    return o
 
 
 TEST_ORDERPOSITION1_RES = {

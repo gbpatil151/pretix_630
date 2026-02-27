@@ -26,6 +26,7 @@ from unittest import mock
 import pytest
 from django_countries.fields import Country
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 
 from pretix.base.models import (
     InvoiceAddress, ItemVariation, Order, OrderPosition, SeatingPlan, SubEvent,
@@ -50,23 +51,20 @@ def variations2(item2):
 
 
 @pytest.fixture
+@freeze_time("2017-12-01 10:00:00+00:00")
 def order(event, item, taxrule):
-    testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
-
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
-        o = Order.objects.create(
-            code='FOO', event=event, email='dummy@dummy.test',
-            status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
-            datetime=datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc),
-            expires=datetime(2017, 12, 10, 10, 0, 0, tzinfo=timezone.utc),
-            sales_channel=event.organizer.sales_channels.get(identifier="web"),
-            total=23, locale='en'
-        )
-        o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
-                      tax_value=Decimal('0.05'), tax_rule=taxrule)
-        InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
-        return o
+    o = Order.objects.create(
+        code='FOO', event=event, email='dummy@dummy.test',
+        status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
+        datetime=datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc),
+        expires=datetime(2017, 12, 10, 10, 0, 0, tzinfo=timezone.utc),
+        sales_channel=event.organizer.sales_channels.get(identifier="web"),
+        total=23, locale='en'
+    )
+    o.fees.create(fee_type=OrderFee.FEE_TYPE_PAYMENT, value=Decimal('0.25'), tax_rate=Decimal('19.00'),
+                  tax_value=Decimal('0.05'), tax_rule=taxrule)
+    InvoiceAddress.objects.create(order=o, company="Sample company", country=Country('NZ'))
+    return o
 
 
 @pytest.fixture
