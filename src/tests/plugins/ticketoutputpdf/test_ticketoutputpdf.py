@@ -73,3 +73,17 @@ def test_generate_pdf(env0):
         assert ftype == 'application/pdf'
         pdf = PdfReader(BytesIO(buf))
         assert len(pdf.pages) == 1
+
+        # Extract text to ensure the renderer placed the elements correctly
+        text = pdf.pages[0].extract_text()
+
+        # Event Name
+        assert "Dummy" in text
+        # Order Code
+        assert "FOOBAR" in text
+        # Item Name
+        assert "T-Shirt" in text
+        # Variation Name
+        assert "Red" in text
+        # Ticket Price
+        assert "12.00" in text
