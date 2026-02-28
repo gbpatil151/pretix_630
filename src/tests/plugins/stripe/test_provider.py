@@ -4,33 +4,42 @@
 # Copyright (C) 2014-2020  Raphael Michel and contributors
 # Copyright (C) 2020-today pretix GmbH and contributors
 #
-# This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
-# Public License as published by the Free Software Foundation in version 3 of the License.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation in version 3 of the License.
 #
-# ADDITIONAL TERMS APPLY: Pursuant to Section 7 of the GNU Affero General Public License, additional terms are
-# applicable granting you additional permissions and placing additional restrictions on your usage of this software.
-# Please refer to the pretix LICENSE file to obtain the full terms applicable to this work. If you did not receive
-# this file, see <https://pretix.eu/about/en/license>.
+# ADDITIONAL TERMS APPLY: Pursuant to Section 7 of the GNU Affero General
+# Public License, additional terms are applicable granting you additional
+# permissions and placing additional restrictions on your usage of
+# this software. Please refer to the pretix LICENSE file to obtain the full
+# terms applicable to this work. If you did not receive this file, see
+# <https://pretix.eu/about/en/license>.
 #
-# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
-# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
-# details.
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
 #
-# You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
-# <https://www.gnu.org/licenses/>.
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-# This file is based on an earlier version of pretix which was released under the Apache License 2.0. The full text of
-# the Apache License 2.0 can be obtained at <http://www.apache.org/licenses/LICENSE-2.0>.
+# This file is based on an earlier version of pretix which was released under
+# the Apache License 2.0. The full text of the Apache License 2.0 can be
+# obtained at <http://www.apache.org/licenses/LICENSE-2.0>.
 #
-# This file may have since been changed and any changes are released under the terms of AGPLv3 as described above. A
-# full history of changes and contributors is available at <https://github.com/pretix/pretix>.
+# This file may have since been changed and any changes are released under
+# the terms of AGPLv3 as described above. A full history of changes and
+# contributors is available at <https://github.com/pretix/pretix>.
 #
-# This file contains Apache-licensed contributions copyrighted by: Jakob Schnell
+# This file contains Apache-licensed contributions copyrighted by:
+# Jakob Schnell
 #
-# Unless required by applicable law or agreed to in writing, software distributed under the Apache License 2.0 is
-# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-# License for the specific language governing permissions and limitations under the License.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the Apache License 2.0 is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import json
 from datetime import timedelta
@@ -69,7 +78,10 @@ def env():
 @pytest.fixture(autouse=True)
 def no_messages(monkeypatch):
     # Patch out template rendering for performance improvements
-    monkeypatch.setattr("django.contrib.messages.api.add_message", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "django.contrib.messages.api.add_message",
+        lambda *args, **kwargs: None
+    )
 
 
 @pytest.fixture
@@ -191,7 +203,10 @@ def test_perform_card_error(env, factory, monkeypatch):
     event, order = env
 
     def paymentintent_create(**kwargs):
-        raise error.CardError(message='Your card was declined.', param='foo', code='card_declined')
+        raise error.CardError(
+            message='Your card was declined.',
+            param='foo', code='card_declined'
+        )
 
     monkeypatch.setattr("stripe.ApplePayDomain.create", apple_domain_create)
     monkeypatch.setattr("stripe.PaymentIntent.create", paymentintent_create)
@@ -237,7 +252,10 @@ def test_perform_stripe_error(env, factory, monkeypatch):
             provider='stripe_cc', amount=order.total
         )
         prov.execute_payment(req, payment)
-    assert 'trouble communicating with Stripe' in str(excinfo.value) or 'We had trouble communicating with Stripe. Please try again later.' in str(excinfo.value)
+    assert (
+        'trouble communicating with Stripe' in str(excinfo.value) or
+        'We had trouble communicating with Stripe' in str(excinfo.value)
+    )
     order.refresh_from_db()
     assert order.status == Order.STATUS_PENDING
 
@@ -297,9 +315,10 @@ def test_refund_success(env, factory, monkeypatch):
     monkeypatch.setattr("stripe.Charge.retrieve", charge_retr)
     monkeypatch.setattr("stripe.Refund.create", refund_create)
     order.status = Order.STATUS_PAID
-    p = order.payments.create(provider='stripe_cc', amount=order.total, info=json.dumps({
-        'id': 'ch_123345345'
-    }))
+    p = order.payments.create(
+        provider='stripe_cc', amount=order.total,
+        info=json.dumps({'id': 'ch_123345345'})
+    )
     order.save()
     prov = StripeCC(event)
     refund = order.refunds.create(
@@ -326,9 +345,10 @@ def test_refund_unavailable(env, factory, monkeypatch):
     monkeypatch.setattr("stripe.Charge.retrieve", charge_retr)
     monkeypatch.setattr("stripe.Refund.create", refund_create)
     order.status = Order.STATUS_PAID
-    p = order.payments.create(provider='stripe_cc', amount=order.total, info=json.dumps({
-        'id': 'ch_123345345'
-    }))
+    p = order.payments.create(
+        provider='stripe_cc', amount=order.total,
+        info=json.dumps({'id': 'ch_123345345'})
+    )
     order.save()
     prov = StripeCC(event)
     refund = order.refunds.create(
