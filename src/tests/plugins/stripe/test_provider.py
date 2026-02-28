@@ -191,7 +191,7 @@ def test_perform_card_error(env, factory, monkeypatch):
     event, order = env
 
     def paymentintent_create(**kwargs):
-        raise error.CardError(message='Foo', param='foo', code=100)
+        raise error.CardError(message='Your card was declined.', param='foo', code='card_declined')
 
     monkeypatch.setattr("stripe.ApplePayDomain.create", apple_domain_create)
     monkeypatch.setattr("stripe.PaymentIntent.create", paymentintent_create)
@@ -204,11 +204,12 @@ def test_perform_card_error(env, factory, monkeypatch):
     req.session = {}
     prov.checkout_prepare(req, {})
     assert 'payment_stripe_card_payment_method_id' in req.session
-    with pytest.raises(PaymentException):
+    with pytest.raises(PaymentException) as excinfo:
         payment = order.payments.create(
             provider='stripe_cc', amount=order.total
         )
         prov.execute_payment(req, payment)
+    assert 'Your card was declined.' in str(excinfo.value)
     order.refresh_from_db()
     assert order.status == Order.STATUS_PENDING
 
@@ -218,7 +219,7 @@ def test_perform_stripe_error(env, factory, monkeypatch):
     event, order = env
 
     def paymentintent_create(**kwargs):
-        raise error.CardError(message='Foo', param='foo', code=100)
+        raise error.APIConnectionError(message='Network timeout')
 
     monkeypatch.setattr("stripe.ApplePayDomain.create", apple_domain_create)
     monkeypatch.setattr("stripe.PaymentIntent.create", paymentintent_create)
@@ -231,11 +232,12 @@ def test_perform_stripe_error(env, factory, monkeypatch):
     req.session = {}
     prov.checkout_prepare(req, {})
     assert 'payment_stripe_card_payment_method_id' in req.session
-    with pytest.raises(PaymentException):
+    with pytest.raises(PaymentException) as excinfo:
         payment = order.payments.create(
             provider='stripe_cc', amount=order.total
         )
         prov.execute_payment(req, payment)
+    assert 'trouble communicating with Stripe' in str(excinfo.value) or 'We had trouble communicating with Stripe. Please try again later.' in str(excinfo.value)
     order.refresh_from_db()
     assert order.status == Order.STATUS_PENDING
 
