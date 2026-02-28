@@ -19,12 +19,12 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <https://www.gnu.org/licenses/>.
 #
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 
 import pytest
-from django.utils.timezone import now
+from django.utils.timezone import now, make_aware
 from django_scopes import scope
 from pypdf import PdfReader
 
@@ -36,15 +36,16 @@ from pretix.plugins.ticketoutputpdf.ticketoutput import PdfTicketOutput
 
 @pytest.fixture
 def env0():
+    static_time = make_aware(datetime(2023, 1, 1, 10, 0, 0))
     o = Organizer.objects.create(name='Dummy', slug='dummy')
     event = Event.objects.create(
         organizer=o, name='Dummy', slug='dummy',
-        date_from=now(), live=True
+        date_from=static_time, live=True
     )
     o1 = Order.objects.create(
         code='FOOBAR', event=event, email='dummy@dummy.test',
         status=Order.STATUS_PENDING,
-        datetime=now(), expires=now() + timedelta(days=10),
+        datetime=static_time, expires=static_time + timedelta(days=10),
         total=Decimal('13.37'),
         sales_channel=o.sales_channels.get(identifier="web"),
     )
@@ -62,7 +63,7 @@ def env0():
 
 
 @pytest.mark.django_db
-def test_generate_pdf(env0):
+def test_generate_pdf(env0, data_regression):
     event, order = env0
     with scope(organizer=event.organizer):
         event.settings.set('ticketoutput_pdf_code_x', 30)
@@ -73,3 +74,14 @@ def test_generate_pdf(env0):
         assert ftype == 'application/pdf'
         pdf = PdfReader(BytesIO(buf))
         assert len(pdf.pages) == 1
+        
+        # Extract text and basic data for regression testing
+        page = pdf.pages[0]
+        extracted_text = page.extract_text()
+        fonts_used = [str(k) for k in page.get("/Resources", {}).get("/Font", {}).keys()]
+        
+        data_regression.check({
+            "text": extracted_text,
+            "fonts": fonts_used,
+            "filename": fname,
+        })

@@ -1,0 +1,7 @@
+filename: orderdummyFOOBAR.pdf
+fonts:
+- /F1
+- /F2
+- /F3+0
+text: "{\"issuer\": \"http://example.com\", \"secret\": \"1234\"}\nDummy\nT-Shirt\
+  \ - Red\n2023-01-01 10:00\nNone\n1234\n €12.00\nFOOBAR\n"
