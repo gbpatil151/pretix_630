@@ -19,12 +19,11 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <https://www.gnu.org/licenses/>.
 #
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
 
 import pytest
-from django.utils.timezone import make_aware
 from django_scopes import scope
 from pypdf import PdfReader
 
@@ -36,7 +35,7 @@ from pretix.plugins.ticketoutputpdf.ticketoutput import PdfTicketOutput
 
 @pytest.fixture
 def env0():
-    static_time = make_aware(datetime(2023, 1, 1, 10, 0, 0))
+    static_time = datetime(2023, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
     o = Organizer.objects.create(name='Dummy', slug='dummy')
     event = Event.objects.create(
         organizer=o, name='Dummy', slug='dummy',
@@ -46,7 +45,7 @@ def env0():
         code='FOOBAR', event=event, email='dummy@dummy.test',
         status=Order.STATUS_PENDING,
         datetime=static_time, expires=static_time + timedelta(days=10),
-        total=Decimal('13.37'),
+        total=Decimal('13.37'), locale='en',
         sales_channel=o.sales_channels.get(identifier="web"),
     )
     shirt = Item.objects.create(event=event, name='T-Shirt', default_price=12)
@@ -80,9 +79,9 @@ def test_generate_pdf(env0, data_regression):
         # Extract text and basic data for regression testing
         page = pdf.pages[0]
         extracted_text = page.extract_text()
-        fonts_used = [
+        fonts_used = sorted([
             str(k) for k in page.get("/Resources", {}).get("/Font", {}).keys()
-        ]
+        ])
         data_regression.check({
             "text": extracted_text,
             "fonts": fonts_used,
