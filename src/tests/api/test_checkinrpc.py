@@ -21,7 +21,6 @@
 #
 import datetime
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django.core.files.base import ContentFile
@@ -61,8 +60,7 @@ def other_item(event):
 def order(event, item, other_item, taxrule):
     testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='FOO', event=event, email='dummy@dummy.test',
             status=Order.STATUS_PAID, secret="k24fiuwvu8kxz3y1",
@@ -109,8 +107,7 @@ def order(event, item, other_item, taxrule):
 def order2(event2, item_on_event2):
     testtime = datetime.datetime(2017, 12, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='BAR', event=event2, email='dummy@dummy.test',
             status=Order.STATUS_PAID, secret="ylptCPNOxTyA",

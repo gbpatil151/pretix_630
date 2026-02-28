@@ -22,12 +22,12 @@
 import copy
 import datetime
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django.core.files.base import ContentFile
 from django.utils.timezone import now
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 from tests.const import SAMPLE_PNG
 
 from pretix.base.models import Question, SeatingPlan
@@ -96,8 +96,7 @@ TEST_CARTPOSITION_RES = {
 def test_cp_list(token_client, organizer, event, item, taxrule, question):
     testtime = datetime.datetime(2018, 6, 11, 10, 0, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         cr = CartPosition.objects.create(
             event=event, cart_id="aaa", item=item,
             price=23, attendee_name_parts={'full_name': 'Peter'},
@@ -117,8 +116,7 @@ def test_cp_list(token_client, organizer, event, item, taxrule, question):
 def test_cp_list_api(token_client, organizer, event, item, taxrule, question):
     testtime = datetime.datetime(2018, 6, 11, 10, 0, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         cr = CartPosition.objects.create(
             event=event, cart_id="aaa@api", item=item,
             price=23, attendee_name_parts={'full_name': 'Peter'},
@@ -138,8 +136,7 @@ def test_cp_list_api(token_client, organizer, event, item, taxrule, question):
 def test_cp_detail(token_client, organizer, event, item, taxrule, question):
     testtime = datetime.datetime(2018, 6, 11, 10, 0, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         cr = CartPosition.objects.create(
             event=event, cart_id="aaa@api", item=item,
             price=23, attendee_name_parts={'full_name': 'Peter'},
@@ -159,8 +156,7 @@ def test_cp_detail(token_client, organizer, event, item, taxrule, question):
 def test_cp_delete(token_client, organizer, event, item, taxrule, question):
     testtime = datetime.datetime(2018, 6, 11, 10, 0, 0, 0, tzinfo=datetime.timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         cr = CartPosition.objects.create(
             event=event, cart_id="aaa@api", item=item,
             price=23, attendee_name_parts={'full_name': 'Peter'},

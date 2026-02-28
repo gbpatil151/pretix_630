@@ -21,11 +21,11 @@
 #
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest import mock
 
 import pytest
 from django_countries.fields import Country
 from django_scopes import scopes_disabled
+from freezegun import freeze_time
 
 from pretix.base.models import (
     InvoiceAddress, ItemVariation, Order, OrderPosition, SeatingPlan, SubEvent,
@@ -53,8 +53,7 @@ def variations2(item2):
 def order(event, item, taxrule):
     testtime = datetime(2017, 12, 1, 10, 0, 0, tzinfo=timezone.utc)
 
-    with mock.patch('django.utils.timezone.now') as mock_now:
-        mock_now.return_value = testtime
+    with freeze_time(testtime):
         o = Order.objects.create(
             code='FOO', event=event, email='dummy@dummy.test',
             status=Order.STATUS_PENDING, secret="k24fiuwvu8kxz3y1",
