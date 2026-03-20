@@ -749,6 +749,104 @@ def _check_date(event: Event, now_dt: datetime):
                 raise OrderError(error_messages['ended'])
 
 
+def _check_positions_availability_loop(
+    event: Event,
+    now_dt: datetime,
+    sorted_positions,
+    deleted_positions,
+    delete,
+    products_seen: Counter,
+    q_avail: Counter,
+    v_avail: dict,
+    v_usages: Counter,
+    seats_seen: set,
+    sales_channel: SalesChannel,
+    err,
+):
+    """
+    Validate per-product limits, voucher availability, seats, and quotas for cart positions.
+    Mutates ``products_seen``, ``q_avail``, ``v_avail``, ``v_usages``, ``seats_seen`` and may
+    call ``delete`` on positions. Returns an optional aggregated error message string.
+    """
+    for i, cp in enumerate(sorted_positions):
+        if cp.pk in deleted_positions or not cp.pk:
+            continue
+
+        quotas = cp._cached_quotas
+
+        # Product per order limits
+        products_seen[cp.item] += 1
+        if cp.item.max_per_order and products_seen[cp.item] > cp.item.max_per_order:
+            err = error_messages['max_items_per_product'] % {
+                'max': cp.item.max_per_order,
+                'product': cp.item.name
+            }
+            delete(cp)
+            break
+
+        # Voucher availability
+        if cp.voucher:
+            v_usages[cp.voucher] += 1
+            if cp.voucher not in v_avail:
+                cp.voucher.refresh_from_db(fields=['redeemed'])
+                redeemed_in_carts = CartPosition.objects.filter(
+                    Q(voucher=cp.voucher) & Q(event=event) & Q(expires__gte=now_dt)
+                ).exclude(cart_id=cp.cart_id)
+                v_avail[cp.voucher] = cp.voucher.max_usages - cp.voucher.redeemed - redeemed_in_carts.count()
+            v_avail[cp.voucher] -= 1
+            if v_avail[cp.voucher] < 0:
+                err = err or error_messages['voucher_redeemed']
+                delete(cp)
+                continue
+
+        # Check duplicate seats in order
+        if cp.seat in seats_seen:
+            err = err or error_messages['seat_invalid']
+            delete(cp)
+            break
+
+        if cp.seat:
+            seats_seen.add(cp.seat)
+            # Unlike quotas (which we blindly trust as long as the position is not expired), we check seats every
+            # time, since we absolutely can not overbook a seat.
+            if not cp.seat.is_available(ignore_cart=cp, ignore_voucher_id=cp.voucher_id, sales_channel=sales_channel.identifier):
+                err = err or error_messages['seat_unavailable']
+                delete(cp)
+                continue
+
+        # Check useful quota configuration
+        if len(quotas) == 0:
+            err = err or error_messages['unavailable']
+            delete(cp)
+            continue
+
+        quota_ok = True
+        ignore_all_quotas = cp.expires >= now_dt or (
+            cp.voucher and (
+                cp.voucher.allow_ignore_quota or (cp.voucher.block_quota and cp.voucher.quota is None)
+            )
+        )
+
+        if not ignore_all_quotas:
+            for quota in quotas:
+                if cp.voucher and cp.voucher.block_quota and cp.voucher.quota_id == quota.pk:
+                    continue
+                if quota not in q_avail:
+                    avail = quota.availability(now_dt)
+                    q_avail[quota] = avail[1] if avail[1] is not None else sys.maxsize
+                q_avail[quota] -= 1
+                if q_avail[quota] < 0:
+                    err = err or error_messages['unavailable']
+                    quota_ok = False
+                    break
+
+        if not quota_ok:
+            # Sorry, can't let you keep that!
+            delete(cp)
+
+    return err
+
+
 def _check_positions(event: Event, now_dt: datetime, time_machine_now_dt: datetime, positions: List[CartPosition],
                      sales_channel: SalesChannel, address: InvoiceAddress=None, customer=None):
     err = None
@@ -827,81 +925,11 @@ def _check_positions(event: Event, now_dt: datetime, time_machine_now_dt: dateti
         err = err or (error_messages['max_items'] % limit)
 
     # Check availability
-    for i, cp in enumerate(sorted_positions):
-        if cp.pk in deleted_positions or not cp.pk:
-            continue
-
-        quotas = cp._cached_quotas
-
-        # Product per order limits
-        products_seen[cp.item] += 1
-        if cp.item.max_per_order and products_seen[cp.item] > cp.item.max_per_order:
-            err = error_messages['max_items_per_product'] % {
-                'max': cp.item.max_per_order,
-                'product': cp.item.name
-            }
-            delete(cp)
-            break
-
-        # Voucher availability
-        if cp.voucher:
-            v_usages[cp.voucher] += 1
-            if cp.voucher not in v_avail:
-                cp.voucher.refresh_from_db(fields=['redeemed'])
-                redeemed_in_carts = CartPosition.objects.filter(
-                    Q(voucher=cp.voucher) & Q(event=event) & Q(expires__gte=now_dt)
-                ).exclude(cart_id=cp.cart_id)
-                v_avail[cp.voucher] = cp.voucher.max_usages - cp.voucher.redeemed - redeemed_in_carts.count()
-            v_avail[cp.voucher] -= 1
-            if v_avail[cp.voucher] < 0:
-                err = err or error_messages['voucher_redeemed']
-                delete(cp)
-                continue
-
-        # Check duplicate seats in order
-        if cp.seat in seats_seen:
-            err = err or error_messages['seat_invalid']
-            delete(cp)
-            break
-
-        if cp.seat:
-            seats_seen.add(cp.seat)
-            # Unlike quotas (which we blindly trust as long as the position is not expired), we check seats every
-            # time, since we absolutely can not overbook a seat.
-            if not cp.seat.is_available(ignore_cart=cp, ignore_voucher_id=cp.voucher_id, sales_channel=sales_channel.identifier):
-                err = err or error_messages['seat_unavailable']
-                delete(cp)
-                continue
-
-        # Check useful quota configuration
-        if len(quotas) == 0:
-            err = err or error_messages['unavailable']
-            delete(cp)
-            continue
-
-        quota_ok = True
-        ignore_all_quotas = cp.expires >= now_dt or (
-            cp.voucher and (
-                cp.voucher.allow_ignore_quota or (cp.voucher.block_quota and cp.voucher.quota is None)
-            )
-        )
-
-        if not ignore_all_quotas:
-            for quota in quotas:
-                if cp.voucher and cp.voucher.block_quota and cp.voucher.quota_id == quota.pk:
-                    continue
-                if quota not in q_avail:
-                    avail = quota.availability(now_dt)
-                    q_avail[quota] = avail[1] if avail[1] is not None else sys.maxsize
-                q_avail[quota] -= 1
-                if q_avail[quota] < 0:
-                    err = err or error_messages['unavailable']
-                    quota_ok = False
-                    break
-
-        if not quota_ok:
-            # Sorry, can't let you keep that!
-            delete(cp)
+    err = _check_positions_availability_loop(
+        event, now_dt, sorted_positions, deleted_positions, delete,
+        products_seen, q_avail, v_avail, v_usages, seats_seen, sales_channel,
+        err,
+    )
 
     for voucher, cnt in v_usages.items():
         if 0 < cnt < voucher.min_usages_remaining:
