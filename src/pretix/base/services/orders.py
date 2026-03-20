@@ -704,6 +704,21 @@ def _cancel_order(order, user=None, send_mail: bool=True, api_token=None, device
     return order.pk
 
 
+def _calculate_voucher_budget_use(position) -> None:
+    """
+    Recompute ``voucher_budget_use`` for a position when a voucher applies and
+    the line is not an addon.
+    """
+    if position.voucher_budget_use is None or not position.voucher or position.addon_to_id:
+        return
+    listed_price = get_listed_price(position.item, position.variation, position.subevent)
+    if not position.item.tax_rule or position.item.tax_rule.price_includes_tax:
+        price_after_voucher = max(position.price, position.voucher.calculate_price(listed_price))
+    else:
+        price_after_voucher = max(position.price - position.tax_value, position.voucher.calculate_price(listed_price))
+    position.voucher_budget_use = max(listed_price - price_after_voucher, Decimal('0.00'))
+
+
 def _check_date(event: Event, now_dt: datetime):
     if event.presale_start and now_dt < event.presale_start:
         raise OrderError(error_messages['not_started'])
@@ -2322,13 +2337,7 @@ class OrderChangeManager:
                 position.variation = op.variation
                 position._calculate_tax()
 
-                if position.voucher_budget_use is not None and position.voucher and not position.addon_to_id:
-                    listed_price = get_listed_price(position.item, position.variation, position.subevent)
-                    if not position.item.tax_rule or position.item.tax_rule.price_includes_tax:
-                        price_after_voucher = max(position.price, position.voucher.calculate_price(listed_price))
-                    else:
-                        price_after_voucher = max(position.price - position.tax_value, position.voucher.calculate_price(listed_price))
-                    position.voucher_budget_use = max(listed_price - price_after_voucher, Decimal('0.00'))
+                _calculate_voucher_budget_use(position)
                 secret_dirty.add(position)
                 position.save()
             elif isinstance(op, self.MembershipOperation):
@@ -2366,13 +2375,7 @@ class OrderChangeManager:
                 })
                 position.subevent = op.subevent
                 secret_dirty.add(position)
-                if position.voucher_budget_use is not None and position.voucher and not position.addon_to_id:
-                    listed_price = get_listed_price(position.item, position.variation, position.subevent)
-                    if not position.item.tax_rule or position.item.tax_rule.price_includes_tax:
-                        price_after_voucher = max(position.price, position.voucher.calculate_price(listed_price))
-                    else:
-                        price_after_voucher = max(position.price - position.tax_value, position.voucher.calculate_price(listed_price))
-                    position.voucher_budget_use = max(listed_price - price_after_voucher, Decimal('0.00'))
+                _calculate_voucher_budget_use(position)
                 position.save()
             elif isinstance(op, self.AddFeeOperation):
                 self.order.log_action('pretix.event.order.changed.addfee', user=self.user, auth=self.auth, data={
