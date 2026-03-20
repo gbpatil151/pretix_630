@@ -45,4 +45,16 @@ Time is recorded in **15-minute increments**. Categories: triage, plan, implemen
   - Added `DEFAULT_PRIMARY_FONT`, `HEX_COLOR_REGEX`, shared `_HEX_COLOR_VALIDATOR`; deduped theme color fields.
   - Split `validate_event_settings` into `_validate_event_settings_*` helpers.
 
+### Issue #28 / #29 / #32 / #33 (orders & invoices — earlier PRs on `master`)
+- Notes (fill hours as required for grading):
+  - **#28** — `build_invoice` split into helpers in `invoices.py`.
+  - **#29** — `_reverse_issued_gift_cards_for_line` + gift card reversal dedup on cancel paths.
+  - **#32** — `_calculate_voucher_budget_use` for voucher budget dedup.
+  - **#33** — `_check_positions_availability_loop` extracted from `_check_positions`.
+
+### Issue #27 / #30 (cancel order refactor — open PRs)
+- Notes:
+  - **#27** — `_cancel_order` split into step helpers (branch `p2/issue-27-extract-cancel-order-steps`, PR #46).
+  - **#30** — `CancellationParams` dataclass for `_cancel_order` (branch `p2/issue-30-cancel-order-param-object`, PR #47; depends on #46).
+
 <!-- Add one block per completed issue after merge -->
