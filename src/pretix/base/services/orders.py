@@ -740,7 +740,6 @@ def _reactivate_credit_issued_gift_cards_for_position(position: OrderPosition, o
         break
 
 
-
 def _check_date(event: Event, now_dt: datetime):
     if event.presale_start and now_dt < event.presale_start:
         raise OrderError(error_messages['not_started'])
