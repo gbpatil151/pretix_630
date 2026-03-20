@@ -547,26 +547,16 @@ def _cancel_order(order, user=None, send_mail: bool=True, api_token=None, device
                 invoices.append(generate_cancellation(i))
 
         for position in order.positions.all():
-            for gc in position.issued_gift_cards.all():
-                gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
-                if gc.value < position.price:
-                    raise OrderError(
-                        _('This order can not be canceled since the gift card {card} purchased in '
-                          'this order has already been redeemed.').format(
-                            card=gc.secret
-                        )
-                    )
-                else:
-                    gc.transactions.create(value=-position.price, order=order, acceptor=order.event.organizer)
-                    gc.log_action(
-                        action='pretix.giftcards.transaction.manual',
-                        user=user,
-                        data={
-                            'value': -position.price,
-                            'acceptor_id': order.event.organizer.id,
-                            'acceptor_slug': order.event.organizer.slug
-                        }
-                    )
+            _reverse_issued_gift_cards_for_line(
+                position,
+                order=order,
+                line_price=position.price,
+                not_redeemed_message=_(
+                    'This order can not be canceled since the gift card {card} purchased in '
+                    'this order has already been redeemed.'
+                ),
+                user=user,
+            )
 
             for m in position.granted_memberships.all():
                 m.canceled = True
@@ -717,6 +707,29 @@ def _calculate_voucher_budget_use(position) -> None:
     else:
         price_after_voucher = max(position.price - position.tax_value, position.voucher.calculate_price(listed_price))
     position.voucher_budget_use = max(listed_price - price_after_voucher, Decimal('0.00'))
+
+
+def _reverse_issued_gift_cards_for_line(line, *, order, line_price, not_redeemed_message, user=None, auth=None):
+    """
+    Reverse balances on gift cards issued for this order line when canceling or changing an order.
+
+    ``not_redeemed_message`` must contain a ``{card}`` placeholder (see call sites).
+    """
+    for gc in line.issued_gift_cards.all():
+        gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
+        if gc.value < line_price:
+            raise OrderError(not_redeemed_message.format(card=gc.secret))
+        gc.transactions.create(value=-line_price, order=order, acceptor=order.event.organizer)
+        gc.log_action(
+            action='pretix.giftcards.transaction.manual',
+            user=user,
+            auth=auth,
+            data={
+                'value': -line_price,
+                'acceptor_id': order.event.organizer.id,
+                'acceptor_slug': order.event.organizer.slug
+            }
+        )
 
 
 def _check_date(event: Event, now_dt: datetime):
@@ -2446,26 +2459,17 @@ class OrderChangeManager:
                 fee.save(update_fields=['canceled'])
             elif isinstance(op, self.CancelOperation):
                 position = position_cache.setdefault(op.position.pk, op.position)
-                for gc in position.issued_gift_cards.all():
-                    gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
-                    if gc.value < position.price:
-                        raise OrderError(_(
-                            'A position can not be canceled since the gift card {card} purchased in this order has '
-                            'already been redeemed.').format(
-                            card=gc.secret
-                        ))
-                    else:
-                        gc.transactions.create(value=-position.price, order=self.order, acceptor=self.order.event.organizer)
-                        gc.log_action(
-                            action='pretix.giftcards.transaction.manual',
-                            user=self.user,
-                            auth=self.auth,
-                            data={
-                                'value': -position.price,
-                                'acceptor_id': self.order.event.organizer.id,
-                                'acceptor_slug': self.order.event.organizer.slug
-                            }
-                        )
+                _reverse_issued_gift_cards_for_line(
+                    position,
+                    order=self.order,
+                    line_price=position.price,
+                    not_redeemed_message=_(
+                        'A position can not be canceled since the gift card {card} purchased in this order has '
+                        'already been redeemed.'
+                    ),
+                    user=self.user,
+                    auth=self.auth,
+                )
 
                 for m in position.granted_memberships.with_usages().all():
                     m.canceled = True
@@ -2473,26 +2477,17 @@ class OrderChangeManager:
 
                 for opa in position.addons.all():
                     opa = position_cache.setdefault(opa.pk, opa)
-                    for gc in opa.issued_gift_cards.all():
-                        gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
-                        if gc.value < opa.position.price:
-                            raise OrderError(_(
-                                'A position can not be canceled since the gift card {card} purchased in this order has '
-                                'already been redeemed.').format(
-                                card=gc.secret
-                            ))
-                        else:
-                            gc.transactions.create(value=-opa.position.price, order=self.order, acceptor=self.order.event.organizer)
-                            gc.log_action(
-                                action='pretix.giftcards.transaction.manual',
-                                user=self.user,
-                                auth=self.auth,
-                                data={
-                                    'value': -opa.position.price,
-                                    'acceptor_id': self.order.event.organizer.id,
-                                    'acceptor_slug': self.order.event.organizer.slug
-                                }
-                            )
+                    _reverse_issued_gift_cards_for_line(
+                        opa,
+                        order=self.order,
+                        line_price=opa.price,
+                        not_redeemed_message=_(
+                            'A position can not be canceled since the gift card {card} purchased in this order has '
+                            'already been redeemed.'
+                        ),
+                        user=self.user,
+                        auth=self.auth,
+                    )
 
                     for m in opa.granted_memberships.with_usages().all():
                         m.canceled = True
