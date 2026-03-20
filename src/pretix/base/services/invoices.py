@@ -75,6 +75,297 @@ def _location_oneliner(loc):
     return ', '.join([l.strip() for l in loc.splitlines() if l and l.strip()])
 
 
+def _set_invoice_metadata(invoice: Invoice, lp) -> None:
+    """Apply invoice header fields and payment/introductory/footer text."""
+    invoice.invoice_from = invoice.event.settings.get('invoice_address_from')
+    invoice.invoice_from_name = invoice.event.settings.get('invoice_address_from_name')
+    invoice.invoice_from_zipcode = invoice.event.settings.get('invoice_address_from_zipcode')
+    invoice.invoice_from_city = invoice.event.settings.get('invoice_address_from_city')
+    invoice.invoice_from_state = invoice.event.settings.get('invoice_address_from_state')
+    invoice.invoice_from_country = invoice.event.settings.get('invoice_address_from_country')
+    invoice.invoice_from_tax_id = invoice.event.settings.get('invoice_address_from_tax_id')
+    invoice.invoice_from_vat_id = invoice.event.settings.get('invoice_address_from_vat_id')
+
+    introductory = invoice.event.settings.get('invoice_introductory_text', as_type=LazyI18nString)
+    additional = invoice.event.settings.get('invoice_additional_text', as_type=LazyI18nString)
+    footer = invoice.event.settings.get('invoice_footer_text', as_type=LazyI18nString)
+    if lp and lp.payment_provider:
+        if 'payment' in inspect.signature(lp.payment_provider.render_invoice_text).parameters:
+            payment = str(lp.payment_provider.render_invoice_text(invoice.order, lp))
+        else:
+            payment = str(lp.payment_provider.render_invoice_text(invoice.order))
+        payment_stamp = lp.payment_provider.render_invoice_stamp(invoice.order, lp)
+    else:
+        payment = ""
+        payment_stamp = None
+    if invoice.event.settings.invoice_include_expire_date and invoice.order.status == Order.STATUS_PENDING:
+        if payment:
+            payment += "<br /><br />"
+        payment += pgettext("invoice", "Please complete your payment before {expire_date}.").format(
+            expire_date=date_format(invoice.order.expires, "SHORT_DATE_FORMAT")
+        )
+
+    invoice.introductory_text = str(introductory).replace('\n', '<br />').replace('\r', '')
+    invoice.additional_text = str(additional).replace('\n', '<br />').replace('\r', '')
+    invoice.footer_text = str(footer)
+    invoice.payment_provider_text = str(payment).replace('\n', '<br />').replace('\r', '')
+    invoice.payment_provider_stamp = str(payment_stamp) if payment_stamp else None
+
+
+def _set_invoice_address(invoice: Invoice):
+    """
+    Copy invoice recipient / VAT / foreign-currency fields from the order's
+    ``InvoiceAddress``. Returns the address instance or ``None``.
+    """
+    try:
+        ia = invoice.order.invoice_address
+        addr_template = pgettext("invoice", """{i.company}
+{i.name}
+{i.street}
+{i.zipcode} {i.city} {state}
+{country}""")
+        invoice.invoice_to = "\n".join(
+            a.strip() for a in addr_template.format(
+                i=ia,
+                country=ia.country.name if ia.country else ia.country_old,
+                state=ia.state_for_address
+            ).split("\n") if a.strip()
+        )
+        invoice.internal_reference = ia.internal_reference
+        invoice.custom_field = ia.custom_field
+        invoice.invoice_to_company = ia.company
+        invoice.invoice_to_is_business = ia.is_business
+        invoice.invoice_to_name = ia.name
+        invoice.invoice_to_street = ia.street
+        invoice.invoice_to_zipcode = ia.zipcode
+        invoice.invoice_to_city = ia.city
+        invoice.invoice_to_country = ia.country
+        invoice.invoice_to_state = ia.state
+        invoice.invoice_to_beneficiary = ia.beneficiary
+        invoice.invoice_to_transmission_info = ia.transmission_info or {}
+        invoice.transmission_type = ia.transmission_type
+
+        if ia.vat_id:
+            invoice.invoice_to += "\n" + pgettext("invoice", "VAT-ID: %s") % ia.vat_id
+            invoice.invoice_to_vat_id = ia.vat_id
+
+        if invoice.event.settings.invoice_eu_currencies == 'True':
+            cc = str(ia.country)
+            if cc in EU_CURRENCIES and EU_CURRENCIES[cc] != invoice.event.currency:
+                invoice.foreign_currency_display = EU_CURRENCIES[cc]
+
+                if settings.FETCH_ECB_RATES:
+                    rate = ExchangeRate.objects.filter(
+                        source='eu:ecb:eurofxref-daily',
+                        source_currency=invoice.event.currency,
+                        other_currency=invoice.foreign_currency_display,
+                        source_date__gt=now().date() - timedelta(days=7)
+                    ).first()
+                    if rate:
+                        invoice.foreign_currency_rate = rate.rate.quantize(Decimal('0.0001'), ROUND_HALF_UP)
+                        invoice.foreign_currency_rate_date = rate.source_date
+                        invoice.foreign_currency_source = 'eu:ecb:eurofxref-daily'
+                    else:
+                        rate_eur_to_event = ExchangeRate.objects.filter(
+                            source='eu:ecb:eurofxref-daily',
+                            source_currency='EUR',
+                            other_currency=invoice.event.currency,
+                            source_date__gt=now().date() - timedelta(days=7)
+                        ).first()
+                        rate_eur_to_wanted = ExchangeRate.objects.filter(
+                            source='eu:ecb:eurofxref-daily',
+                            source_currency='EUR',
+                            other_currency=invoice.foreign_currency_display,
+                            source_date__gt=now().date() - timedelta(days=7)
+                        ).first()
+                        if rate_eur_to_wanted and rate_eur_to_event:
+                            invoice.foreign_currency_rate = (
+                                rate_eur_to_wanted.rate / rate_eur_to_event.rate
+                            ).quantize(Decimal('0.0001'), ROUND_HALF_UP)
+                            invoice.foreign_currency_rate_date = min(rate_eur_to_wanted.source_date, rate_eur_to_event.source_date)
+                            invoice.foreign_currency_source = 'eu:ecb:eurofxref-daily'
+        elif invoice.event.settings.invoice_eu_currencies == 'CZK' and invoice.event.currency != 'CZK':
+            invoice.foreign_currency_display = 'CZK'
+            if settings.FETCH_ECB_RATES:
+                rate = ExchangeRate.objects.filter(
+                    source='cz:cnb:rate-fixing-daily',
+                    source_currency=invoice.event.currency,
+                    other_currency=invoice.foreign_currency_display,
+                    source_date__gt=now().date() - timedelta(days=7)
+                ).first()
+                if rate:
+                    invoice.foreign_currency_rate = rate.rate.quantize(Decimal('0.0001'), ROUND_HALF_UP)
+                    invoice.foreign_currency_rate_date = rate.source_date
+                    invoice.foreign_currency_source = 'cz:cnb:rate-fixing-daily'
+
+        return ia
+
+    except InvoiceAddress.DoesNotExist:
+        invoice.invoice_to = ""
+        return None
+
+
+def _add_invoice_position_lines(
+    invoice: Invoice,
+    positions,
+    ia,
+    now_dt,
+    locations,
+    tax_texts,
+    reverse_charge,
+    min_period_start,
+    max_period_end,
+):
+    """Create ``InvoiceLine`` rows for order positions; update period bounds and tax texts."""
+    if invoice.event.settings.invoice_event_location and len(locations) == 1 and list(locations)[0] is not None:
+        tax_texts.append(pgettext("invoice", "Event location: {location}").format(
+            location=_location_oneliner(str(list(locations)[0]))
+        ))
+
+    for i, p in enumerate(positions):
+        if not invoice.event.settings.invoice_include_free and p.price == Decimal('0.00') and not p.addon_c:
+            continue
+
+        location = str((p.subevent or invoice.event).location) if (p.subevent or invoice.event).location else None
+
+        desc = str(p.item.name)
+        if p.variation:
+            desc += " - " + str(p.variation.value)
+        if p.addon_to_id:
+            desc = "  + " + desc
+        if invoice.event.settings.invoice_attendee_name and p.attendee_name:
+            desc += "<br />" + pgettext("invoice", "Attendee: {name}").format(
+                name=p.attendee_name
+            )
+
+        for recv, resp in invoice_line_text.send(sender=invoice.event, position=p):
+            if resp:
+                desc += "<br/>" + resp
+
+        answers_qs = p.answers.filter(
+            question__print_on_invoice=True
+        ).select_related(
+            'question'
+        ).order_by(
+            'question__position',
+            'question__id'
+        )
+        for answ in answers_qs:
+            desc += "<br />{}{} {}".format(
+                answ.question.question,
+                "" if str(answ.question.question).endswith("?") else ":",
+                answ.to_string_i18n()
+            )
+
+        if invoice.event.has_subevents:
+            desc += "<br />" + pgettext("subevent", "Date: {}").format(p.subevent)
+
+        if invoice.event.settings.invoice_event_location and location and len(locations) > 1:
+            desc += "<br />" + pgettext("invoice", "Event location: {location}").format(
+                location=_location_oneliner(location)
+            )
+
+        period_start, period_end = _service_period_for_position(invoice, p, now_dt)
+        min_period_start = min(min_period_start or period_start, period_start)
+        max_period_end = min(max_period_end or period_end, period_end)
+
+        InvoiceLine.objects.create(
+            position=i,
+            invoice=invoice,
+            description=desc,
+            gross_value=p.price,
+            tax_value=p.tax_value,
+            subevent=p.subevent,
+            item=p.item,
+            variation=p.variation,
+            attendee_name=p.attendee_name if invoice.event.settings.invoice_attendee_name else None,
+            period_start=period_start,
+            period_end=period_end,
+            event_location=location if invoice.event.settings.invoice_event_location else None,
+            tax_rate=p.tax_rate,
+            tax_code=p.tax_code,
+            tax_name=p.tax_rule.name if p.tax_rule else ''
+        )
+
+        if p.tax_rule and p.tax_rule.is_reverse_charge(ia) and p.price and not p.tax_value:
+            reverse_charge = True
+
+        if p.tax_rule:
+            tax_text = p.tax_rule.invoice_text(ia)
+            if tax_text and tax_text not in tax_texts:
+                tax_texts.append(tax_text)
+
+    return min_period_start, max_period_end, tax_texts, reverse_charge
+
+
+def _add_invoice_fee_lines(
+    invoice: Invoice,
+    fees,
+    positions,
+    ia,
+    now_dt,
+    min_period_start,
+    max_period_end,
+    tax_texts,
+    reverse_charge,
+):
+    """Create ``InvoiceLine`` rows for order fees."""
+    offset = len(positions)
+    for i, fee in enumerate(fees):
+        if fee.fee_type == OrderFee.FEE_TYPE_OTHER and fee.description:
+            fee_title = fee.description
+        else:
+            fee_title = _(fee.get_fee_type_display())
+            if fee.description:
+                fee_title += " - " + fee.description
+
+        if min_period_start and max_period_end:
+            # Consider fees to have the same service period as the products sold
+            period_start = min_period_start
+            period_end = max_period_end
+        else:
+            # Usually can only happen if everything except a cancellation fee is removed
+            if invoice.event.settings.invoice_period in ("auto", "auto_no_event", "event_date") and not invoice.event.has_subevents:
+                # Non-series event, let's be backwards-compatible and tag everything with the event period
+                period_start = invoice.event.date_from
+                period_end = invoice.event.date_to
+            else:
+                # We could try to work from the canceled positions, but it doesn't really make sense. A cancellation
+                # fee is not "delivered" at the event date, it is rather effective right now.
+                period_start = period_end = now()
+
+        InvoiceLine.objects.create(
+            position=i + offset,
+            invoice=invoice,
+            description=fee_title,
+            gross_value=fee.value,
+            period_start=period_start,
+            period_end=period_end,
+            event_location=(
+                None if invoice.event.has_subevents
+                else (str(invoice.event.location)
+                      if invoice.event.settings.invoice_event_location and invoice.event.location
+                      else None)
+            ),
+            tax_value=fee.tax_value,
+            tax_rate=fee.tax_rate,
+            tax_code=fee.tax_code,
+            tax_name=fee.tax_rule.name if fee.tax_rule else '',
+            fee_type=fee.fee_type,
+            fee_internal_type=fee.internal_type or None,
+        )
+
+        if fee.tax_rule and fee.tax_rule.is_reverse_charge(ia) and fee.value and not fee.tax_value:
+            reverse_charge = True
+
+        if fee.tax_rule:
+            tax_text = fee.tax_rule.invoice_text(ia)
+            if tax_text and tax_text not in tax_texts:
+                tax_texts.append(tax_text)
+
+    return tax_texts, reverse_charge
+
+
 @transaction.atomic
 def build_invoice(invoice: Invoice) -> Invoice:
     invoice.locale = invoice.event.settings.get('invoice_language', invoice.event.settings.locale)
@@ -89,124 +380,8 @@ def build_invoice(invoice: Invoice) -> Invoice:
     now_dt = now()
 
     with (language(invoice.locale, invoice.event.settings.region)):
-        invoice.invoice_from = invoice.event.settings.get('invoice_address_from')
-        invoice.invoice_from_name = invoice.event.settings.get('invoice_address_from_name')
-        invoice.invoice_from_zipcode = invoice.event.settings.get('invoice_address_from_zipcode')
-        invoice.invoice_from_city = invoice.event.settings.get('invoice_address_from_city')
-        invoice.invoice_from_state = invoice.event.settings.get('invoice_address_from_state')
-        invoice.invoice_from_country = invoice.event.settings.get('invoice_address_from_country')
-        invoice.invoice_from_tax_id = invoice.event.settings.get('invoice_address_from_tax_id')
-        invoice.invoice_from_vat_id = invoice.event.settings.get('invoice_address_from_vat_id')
-
-        introductory = invoice.event.settings.get('invoice_introductory_text', as_type=LazyI18nString)
-        additional = invoice.event.settings.get('invoice_additional_text', as_type=LazyI18nString)
-        footer = invoice.event.settings.get('invoice_footer_text', as_type=LazyI18nString)
-        if lp and lp.payment_provider:
-            if 'payment' in inspect.signature(lp.payment_provider.render_invoice_text).parameters:
-                payment = str(lp.payment_provider.render_invoice_text(invoice.order, lp))
-            else:
-                payment = str(lp.payment_provider.render_invoice_text(invoice.order))
-            payment_stamp = lp.payment_provider.render_invoice_stamp(invoice.order, lp)
-        else:
-            payment = ""
-            payment_stamp = None
-        if invoice.event.settings.invoice_include_expire_date and invoice.order.status == Order.STATUS_PENDING:
-            if payment:
-                payment += "<br /><br />"
-            payment += pgettext("invoice", "Please complete your payment before {expire_date}.").format(
-                expire_date=date_format(invoice.order.expires, "SHORT_DATE_FORMAT")
-            )
-
-        invoice.introductory_text = str(introductory).replace('\n', '<br />').replace('\r', '')
-        invoice.additional_text = str(additional).replace('\n', '<br />').replace('\r', '')
-        invoice.footer_text = str(footer)
-        invoice.payment_provider_text = str(payment).replace('\n', '<br />').replace('\r', '')
-        invoice.payment_provider_stamp = str(payment_stamp) if payment_stamp else None
-
-        try:
-            ia = invoice.order.invoice_address
-            addr_template = pgettext("invoice", """{i.company}
-{i.name}
-{i.street}
-{i.zipcode} {i.city} {state}
-{country}""")
-            invoice.invoice_to = "\n".join(
-                a.strip() for a in addr_template.format(
-                    i=ia,
-                    country=ia.country.name if ia.country else ia.country_old,
-                    state=ia.state_for_address
-                ).split("\n") if a.strip()
-            )
-            invoice.internal_reference = ia.internal_reference
-            invoice.custom_field = ia.custom_field
-            invoice.invoice_to_company = ia.company
-            invoice.invoice_to_is_business = ia.is_business
-            invoice.invoice_to_name = ia.name
-            invoice.invoice_to_street = ia.street
-            invoice.invoice_to_zipcode = ia.zipcode
-            invoice.invoice_to_city = ia.city
-            invoice.invoice_to_country = ia.country
-            invoice.invoice_to_state = ia.state
-            invoice.invoice_to_beneficiary = ia.beneficiary
-            invoice.invoice_to_transmission_info = ia.transmission_info or {}
-            invoice.transmission_type = ia.transmission_type
-
-            if ia.vat_id:
-                invoice.invoice_to += "\n" + pgettext("invoice", "VAT-ID: %s") % ia.vat_id
-                invoice.invoice_to_vat_id = ia.vat_id
-
-            if invoice.event.settings.invoice_eu_currencies == 'True':
-                cc = str(ia.country)
-                if cc in EU_CURRENCIES and EU_CURRENCIES[cc] != invoice.event.currency:
-                    invoice.foreign_currency_display = EU_CURRENCIES[cc]
-
-                    if settings.FETCH_ECB_RATES:
-                        rate = ExchangeRate.objects.filter(
-                            source='eu:ecb:eurofxref-daily',
-                            source_currency=invoice.event.currency,
-                            other_currency=invoice.foreign_currency_display,
-                            source_date__gt=now().date() - timedelta(days=7)
-                        ).first()
-                        if rate:
-                            invoice.foreign_currency_rate = rate.rate.quantize(Decimal('0.0001'), ROUND_HALF_UP)
-                            invoice.foreign_currency_rate_date = rate.source_date
-                            invoice.foreign_currency_source = 'eu:ecb:eurofxref-daily'
-                        else:
-                            rate_eur_to_event = ExchangeRate.objects.filter(
-                                source='eu:ecb:eurofxref-daily',
-                                source_currency='EUR',
-                                other_currency=invoice.event.currency,
-                                source_date__gt=now().date() - timedelta(days=7)
-                            ).first()
-                            rate_eur_to_wanted = ExchangeRate.objects.filter(
-                                source='eu:ecb:eurofxref-daily',
-                                source_currency='EUR',
-                                other_currency=invoice.foreign_currency_display,
-                                source_date__gt=now().date() - timedelta(days=7)
-                            ).first()
-                            if rate_eur_to_wanted and rate_eur_to_event:
-                                invoice.foreign_currency_rate = (
-                                    rate_eur_to_wanted.rate / rate_eur_to_event.rate
-                                ).quantize(Decimal('0.0001'), ROUND_HALF_UP)
-                                invoice.foreign_currency_rate_date = min(rate_eur_to_wanted.source_date, rate_eur_to_event.source_date)
-                                invoice.foreign_currency_source = 'eu:ecb:eurofxref-daily'
-            elif invoice.event.settings.invoice_eu_currencies == 'CZK' and invoice.event.currency != 'CZK':
-                invoice.foreign_currency_display = 'CZK'
-                if settings.FETCH_ECB_RATES:
-                    rate = ExchangeRate.objects.filter(
-                        source='cz:cnb:rate-fixing-daily',
-                        source_currency=invoice.event.currency,
-                        other_currency=invoice.foreign_currency_display,
-                        source_date__gt=now().date() - timedelta(days=7)
-                    ).first()
-                    if rate:
-                        invoice.foreign_currency_rate = rate.rate.quantize(Decimal('0.0001'), ROUND_HALF_UP)
-                        invoice.foreign_currency_rate_date = rate.source_date
-                        invoice.foreign_currency_source = 'cz:cnb:rate-fixing-daily'
-
-        except InvoiceAddress.DoesNotExist:
-            ia = None
-            invoice.invoice_to = ""
+        _set_invoice_metadata(invoice, lp)
+        ia = _set_invoice_address(invoice)
 
         invoice.file = None
         invoice.save()
@@ -234,136 +409,13 @@ def build_invoice(invoice: Invoice) -> Invoice:
 
         tax_texts = []
 
-        if invoice.event.settings.invoice_event_location and len(locations) == 1 and list(locations)[0] is not None:
-            tax_texts.append(pgettext("invoice", "Event location: {location}").format(
-                location=_location_oneliner(str(list(locations)[0]))
-            ))
+        min_period_start, max_period_end, tax_texts, reverse_charge = _add_invoice_position_lines(
+            invoice, positions, ia, now_dt, locations, tax_texts, reverse_charge, min_period_start, max_period_end
+        )
 
-        for i, p in enumerate(positions):
-            if not invoice.event.settings.invoice_include_free and p.price == Decimal('0.00') and not p.addon_c:
-                continue
-
-            location = str((p.subevent or invoice.event).location) if (p.subevent or invoice.event).location else None
-
-            desc = str(p.item.name)
-            if p.variation:
-                desc += " - " + str(p.variation.value)
-            if p.addon_to_id:
-                desc = "  + " + desc
-            if invoice.event.settings.invoice_attendee_name and p.attendee_name:
-                desc += "<br />" + pgettext("invoice", "Attendee: {name}").format(
-                    name=p.attendee_name
-                )
-
-            for recv, resp in invoice_line_text.send(sender=invoice.event, position=p):
-                if resp:
-                    desc += "<br/>" + resp
-
-            answers_qs = p.answers.filter(
-                question__print_on_invoice=True
-            ).select_related(
-                'question'
-            ).order_by(
-                'question__position',
-                'question__id'
-            )
-            for answ in answers_qs:
-                desc += "<br />{}{} {}".format(
-                    answ.question.question,
-                    "" if str(answ.question.question).endswith("?") else ":",
-                    answ.to_string_i18n()
-                )
-
-            if invoice.event.has_subevents:
-                desc += "<br />" + pgettext("subevent", "Date: {}").format(p.subevent)
-
-            if invoice.event.settings.invoice_event_location and location and len(locations) > 1:
-                desc += "<br />" + pgettext("invoice", "Event location: {location}").format(
-                    location=_location_oneliner(location)
-                )
-
-            period_start, period_end = _service_period_for_position(invoice, p, now_dt)
-            min_period_start = min(min_period_start or period_start, period_start)
-            max_period_end = min(max_period_end or period_end, period_end)
-
-            InvoiceLine.objects.create(
-                position=i,
-                invoice=invoice,
-                description=desc,
-                gross_value=p.price,
-                tax_value=p.tax_value,
-                subevent=p.subevent,
-                item=p.item,
-                variation=p.variation,
-                attendee_name=p.attendee_name if invoice.event.settings.invoice_attendee_name else None,
-                period_start=period_start,
-                period_end=period_end,
-                event_location=location if invoice.event.settings.invoice_event_location else None,
-                tax_rate=p.tax_rate,
-                tax_code=p.tax_code,
-                tax_name=p.tax_rule.name if p.tax_rule else ''
-            )
-
-            if p.tax_rule and p.tax_rule.is_reverse_charge(ia) and p.price and not p.tax_value:
-                reverse_charge = True
-
-            if p.tax_rule:
-                tax_text = p.tax_rule.invoice_text(ia)
-                if tax_text and tax_text not in tax_texts:
-                    tax_texts.append(tax_text)
-
-        offset = len(positions)
-        for i, fee in enumerate(fees):
-            if fee.fee_type == OrderFee.FEE_TYPE_OTHER and fee.description:
-                fee_title = fee.description
-            else:
-                fee_title = _(fee.get_fee_type_display())
-                if fee.description:
-                    fee_title += " - " + fee.description
-
-            if min_period_start and max_period_end:
-                # Consider fees to have the same service period as the products sold
-                period_start = min_period_start
-                period_end = max_period_end
-            else:
-                # Usually can only happen if everything except a cancellation fee is removed
-                if invoice.event.settings.invoice_period in ("auto", "auto_no_event", "event_date") and not invoice.event.has_subevents:
-                    # Non-series event, let's be backwards-compatible and tag everything with the event period
-                    period_start = invoice.event.date_from
-                    period_end = invoice.event.date_to
-                else:
-                    # We could try to work from the canceled positions, but it doesn't really make sense. A cancellation
-                    # fee is not "delivered" at the event date, it is rather effective right now.
-                    period_start = period_end = now()
-
-            InvoiceLine.objects.create(
-                position=i + offset,
-                invoice=invoice,
-                description=fee_title,
-                gross_value=fee.value,
-                period_start=period_start,
-                period_end=period_end,
-                event_location=(
-                    None if invoice.event.has_subevents
-                    else (str(invoice.event.location)
-                          if invoice.event.settings.invoice_event_location and invoice.event.location
-                          else None)
-                ),
-                tax_value=fee.tax_value,
-                tax_rate=fee.tax_rate,
-                tax_code=fee.tax_code,
-                tax_name=fee.tax_rule.name if fee.tax_rule else '',
-                fee_type=fee.fee_type,
-                fee_internal_type=fee.internal_type or None,
-            )
-
-            if fee.tax_rule and fee.tax_rule.is_reverse_charge(ia) and fee.value and not fee.tax_value:
-                reverse_charge = True
-
-            if fee.tax_rule:
-                tax_text = fee.tax_rule.invoice_text(ia)
-                if tax_text and tax_text not in tax_texts:
-                    tax_texts.append(tax_text)
+        tax_texts, reverse_charge = _add_invoice_fee_lines(
+            invoice, fees, positions, ia, now_dt, min_period_start, max_period_end, tax_texts, reverse_charge
+        )
 
         if tax_texts:
             invoice.additional_text += "<br /><br />"
