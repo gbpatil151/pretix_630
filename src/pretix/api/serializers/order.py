@@ -162,48 +162,64 @@ class InvoiceAddressSerializer(I18nAwareModelSerializer):
                 )
 
         if data.get("transmission_type"):
-            for t in get_transmission_types():
-                if data.get("transmission_type") == t.identifier:
-                    if not t.is_available(self.context["request"].event, data.get("country"), data.get("is_business")):
-                        raise ValidationError({
-                            "transmission_type": "The selected transmission type is not available for this country or address type."
-                        })
-
-                    ts = TransmissionInfoSerializer(transmission_type=t, data=data.get("transmission_info", {}))
-                    try:
-                        ts.is_valid(raise_exception=True)
-                    except ValidationError as e:
-                        raise ValidationError(
-                            {"transmission_info": e.detail}
-                        )
-                    data["transmission_info"] = ts.validated_data
-
-                    required_fields = t.invoice_address_form_fields_required(data.get("country"), data.get("is_business"))
-                    for r in required_fields:
-                        if r in self.fields:
-                            if not data.get(r):
-                                raise ValidationError(
-                                    {r: "This field is required for the selected type of invoice transmission."}
-                                )
-                        else:
-                            if not ts.validated_data.get(r):
-                                raise ValidationError(
-                                    {"transmission_info": {r: "This field is required for the selected type of invoice transmission."}}
-                                )
-                    break  # do not call else branch of for loop
-                elif t.is_exclusive(self.context["request"].event, data.get("country"), data.get("is_business")):
-                    if t.is_available(self.context["request"].event, data.get("country"), data.get("is_business")):
-                        raise ValidationError({
-                            "transmission_type": "The transmission type '%s' must be used for this country or address type." % (
-                                t.identifier,
-                            )
-                        })
-            else:
-                raise ValidationError(
-                    {"transmission_type": "Unknown transmission type."}
-                )
+            self._validate_transmission_type(data)
 
         return data
+
+    def _validate_transmission_type(self, data):
+        """Validate invoice transmission type, its info fields, and required fields.
+
+        Extracted from validate() to reduce nesting depth and cognitive
+        complexity (SonarQube rule python:S3776).
+        """
+        event = self.context["request"].event
+        country = data.get("country")
+        is_business = data.get("is_business")
+
+        for t in get_transmission_types():
+            if data.get("transmission_type") == t.identifier:
+                if not t.is_available(event, country, is_business):
+                    raise ValidationError({
+                        "transmission_type": "The selected transmission type is not available for this country or address type."
+                    })
+
+                ts = TransmissionInfoSerializer(transmission_type=t, data=data.get("transmission_info", {}))
+                try:
+                    ts.is_valid(raise_exception=True)
+                except ValidationError as e:
+                    raise ValidationError(
+                        {"transmission_info": e.detail}
+                    )
+                data["transmission_info"] = ts.validated_data
+
+                self._check_transmission_required_fields(t, data, ts.validated_data, country, is_business)
+                break  # do not call else branch of for loop
+            elif t.is_exclusive(event, country, is_business):
+                if t.is_available(event, country, is_business):
+                    raise ValidationError({
+                        "transmission_type": "The transmission type '%s' must be used for this country or address type." % (
+                            t.identifier,
+                        )
+                    })
+        else:
+            raise ValidationError(
+                {"transmission_type": "Unknown transmission type."}
+            )
+
+    def _check_transmission_required_fields(self, transmission_type, data, validated_info, country, is_business):
+        """Check that all fields required by a transmission type are provided."""
+        required_fields = transmission_type.invoice_address_form_fields_required(country, is_business)
+        for r in required_fields:
+            if r in self.fields:
+                if not data.get(r):
+                    raise ValidationError(
+                        {r: "This field is required for the selected type of invoice transmission."}
+                    )
+            else:
+                if not validated_info.get(r):
+                    raise ValidationError(
+                        {"transmission_info": {r: "This field is required for the selected type of invoice transmission."}}
+                    )
 
 
 class AnswerQuestionIdentifierField(serializers.Field):
