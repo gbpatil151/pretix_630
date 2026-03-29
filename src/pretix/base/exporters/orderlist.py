@@ -342,6 +342,24 @@ class OrderListExporter(MultiSheetListExporter):
         headers += next(iter(self.event_object_cache.values())).meta_data.keys()
         return headers
 
+    def _append_tax_rate_cells(self, row, order_id, tax_rates, sum_cache, fee_sum_cache):
+        """Append gross/net/tax columns for each tax rate to the row."""
+        for tr in tax_rates:
+            taxrate_values = sum_cache.get(
+                (order_id, tr), {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')}
+            )
+            fee_taxrate_values = fee_sum_cache.get(
+                (order_id, tr), {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')}
+            )
+            row += [
+                taxrate_values['grosssum'] + fee_taxrate_values['grosssum'],
+                (
+                    taxrate_values['grosssum'] - taxrate_values['taxsum'] +
+                    fee_taxrate_values['grosssum'] - fee_taxrate_values['taxsum']
+                ),
+                taxrate_values['taxsum'] + fee_taxrate_values['taxsum'],
+            ]
+
     def _build_order_row(
         self, order, form_data, qs, tax_rates, name_scheme,
         sum_cache, fee_sum_cache, full_fee_sum_cache,
@@ -367,19 +385,7 @@ class OrderListExporter(MultiSheetListExporter):
             order.locale,
         ]
 
-        for tr in tax_rates:
-            taxrate_values = sum_cache.get((order.id, tr), {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')})
-            fee_taxrate_values = fee_sum_cache.get((order.id, tr),
-                                                   {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')})
-
-            row += [
-                taxrate_values['grosssum'] + fee_taxrate_values['grosssum'],
-                (
-                    taxrate_values['grosssum'] - taxrate_values['taxsum'] +
-                    fee_taxrate_values['grosssum'] - fee_taxrate_values['taxsum']
-                ),
-                taxrate_values['taxsum'] + fee_taxrate_values['taxsum'],
-            ]
+        self._append_tax_rate_cells(row, order.id, tax_rates, sum_cache, fee_sum_cache)
 
         row.append(order.invoice_numbers)
         row.append(order.sales_channel)
@@ -485,70 +491,68 @@ class OrderListExporter(MultiSheetListExporter):
         qs = self._date_filter(qs, form_data, rel='order__')
         return qs
 
-    def iterate_fees(self, form_data: dict):
-        qs = self.fees_qs(form_data)
-
+    def _build_fees_header_row(self, name_scheme):
+        """Return the header list for the fees export sheet."""
         headers = [
-            _('Event slug'),
-            _('Event name'),
-            _('Order code'),
-            _('Status'),
-            _('Email'),
-            _('Phone number'),
-            _('Order date'),
-            _('Order time'),
-            _('Fee type'),
-            _('Description'),
-            _('Price'),
-            _('Tax rate'),
-            _('Tax rule'),
-            _('Tax value'),
-            _('Company'),
-            _('Invoice address name'),
+            _('Event slug'), _('Event name'), _('Order code'), _('Status'),
+            _('Email'), _('Phone number'), _('Order date'), _('Order time'),
+            _('Fee type'), _('Description'), _('Price'), _('Tax rate'),
+            _('Tax rule'), _('Tax value'), _('Company'), _('Invoice address name'),
         ]
-        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme] if not self.is_multievent else None
         if name_scheme and len(name_scheme['fields']) > 1:
             for k, label, w in name_scheme['fields']:
                 headers.append(_('Invoice address name') + ': ' + str(label))
         headers += [
-            _('Address'), _('ZIP code'), _('City'), _('Country'), pgettext('address', 'State'), _('VAT ID'),
+            _('Address'), _('ZIP code'), _('City'), _('Country'),
+            pgettext('address', 'State'), _('VAT ID'),
         ]
-
         headers.append(_('External customer ID'))
         headers.append(_('Payment providers'))
-
-        # get meta_data labels from first cached event
         headers += next(iter(self.event_object_cache.values())).meta_data.keys()
-        yield headers
+        return headers
+
+    def _build_fee_row(self, op, name_scheme):
+        """Build and return a single data row for one OrderFee."""
+        order = op.order
+        tz = ZoneInfo(order.event.settings.timezone)
+        row = [
+            self.event_object_cache[order.event_id].slug,
+            str(self.event_object_cache[order.event_id].name),
+            order.code,
+            _("canceled") if op.canceled else order.get_extended_status_display(),
+            order.email,
+            str(order.phone) if order.phone else '',
+            order.datetime.astimezone(tz).strftime('%Y-%m-%d'),
+            order.datetime.astimezone(tz).strftime('%H:%M:%S'),
+            op.get_fee_type_display(),
+            op.description,
+            op.value,
+            op.tax_rate,
+            str(op.tax_rule) if op.tax_rule else '',
+            op.tax_value,
+        ]
+        row += self._get_invoice_address_row(order, name_scheme, include_custom_field=False)
+        row.append(
+            str(order.customer.external_identifier)
+            if order.customer and order.customer.external_identifier else ''
+        )
+        row.append(', '.join([
+            str(self.providers.get(p, p))
+            for p in sorted(set((op.payment_providers or '').split(',')))
+            if p and p != 'free'
+        ]))
+        row += self.event_object_cache[order.event_id].meta_data.values()
+        return row
+
+    def iterate_fees(self, form_data: dict):
+        qs = self.fees_qs(form_data)
+
+        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme] if not self.is_multievent else None
+        yield self._build_fees_header_row(name_scheme)
 
         yield self.ProgressSetTotal(total=qs.count())
         for op in qs.order_by('order__datetime').iterator():
-            order = op.order
-            tz = ZoneInfo(order.event.settings.timezone)
-            row = [
-                self.event_object_cache[order.event_id].slug,
-                str(self.event_object_cache[order.event_id].name),
-                order.code,
-                _("canceled") if op.canceled else order.get_extended_status_display(),
-                order.email,
-                str(order.phone) if order.phone else '',
-                order.datetime.astimezone(tz).strftime('%Y-%m-%d'),
-                order.datetime.astimezone(tz).strftime('%H:%M:%S'),
-                op.get_fee_type_display(),
-                op.description,
-                op.value,
-                op.tax_rate,
-                str(op.tax_rule) if op.tax_rule else '',
-                op.tax_value,
-            ]
-            row += self._get_invoice_address_row(order, name_scheme, include_custom_field=False)
-            row.append(str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '')
-            row.append(', '.join([
-                str(self.providers.get(p, p)) for p in sorted(set((op.payment_providers or '').split(',')))
-                if p and p != 'free'
-            ]))
-            row += self.event_object_cache[order.event_id].meta_data.values()
-            yield row
+            yield self._build_fee_row(op, name_scheme)
 
     def positions_qs(self, form_data: dict):
         qs = OrderPosition.all.filter(
@@ -665,7 +669,64 @@ class OrderListExporter(MultiSheetListExporter):
 
         return headers, options
 
-    def _build_position_row(self, op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels):
+    def _append_subevent_cells(self, row, op, event_cache_entry):
+        """Append subevent name/start/end date columns to the row."""
+        if op.subevent:
+            row.append(op.subevent.name)
+            row.append(
+                op.subevent.date_from.astimezone(event_cache_entry.timezone)
+                .strftime('%Y-%m-%d %H:%M:%S')
+            )
+            row.append(
+                op.subevent.date_to.astimezone(event_cache_entry.timezone)
+                .strftime('%Y-%m-%d %H:%M:%S')
+                if op.subevent.date_to else ''
+            )
+        else:
+            row += ['', '', '']
+
+    def _build_answer_cache(self, op):
+        """Return a dict mapping question_id -> answer value for the position."""
+        acache = {}
+        for a in op.answers.all():
+            # We do not want to localize Date, Time and Datetime question answers, as those can lead
+            # to difficulties parsing the data (for example 2019-02-01 may become Février, 2019 01 in French).
+            if a.question.type in (Question.TYPE_CHOICE_MULTIPLE, Question.TYPE_CHOICE):
+                acache[a.question_id] = set(o.pk for o in a.options.all())
+            elif a.question.type in Question.UNLOCALIZED_TYPES:
+                acache[a.question_id] = a.answer
+            else:
+                acache[a.question_id] = str(a)
+        return acache
+
+    def _append_question_cells(self, row, questions, options, acache, form_data):
+        """Append one cell per question (or per option for multi-choice) to the row."""
+        for q in questions:
+            if q.type == Question.TYPE_CHOICE_MULTIPLE:
+                if form_data['group_multiple_choice']:
+                    row.append(
+                        ", ".join(
+                            str(o.answer) for o in options[q.pk]
+                            if o.pk in acache.get(q.pk, set())
+                        )
+                    )
+                else:
+                    for o in options[q.pk]:
+                        row.append(_('Yes') if o.pk in acache.get(q.pk, set()) else _('No'))
+            elif q.type == Question.TYPE_CHOICE:
+                # Join is only necessary if the question type was modified but also keeps code simpler
+                row.append(
+                    ", ".join(
+                        str(o.answer) for o in options[q.pk]
+                        if o.pk in acache.get(q.pk, set())
+                    )
+                )
+            else:
+                row.append(acache.get(q.pk, ''))
+
+    def _build_position_row(
+        self, op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels
+    ):
         order = op.order
         tz = ZoneInfo(self.event_object_cache[order.event_id].settings.timezone)
         row = [
@@ -680,17 +741,9 @@ class OrderListExporter(MultiSheetListExporter):
             order.datetime.astimezone(tz).strftime('%H:%M:%S'),
         ]
         if has_subevents:
-            if op.subevent:
-                row.append(op.subevent.name)
-                row.append(op.subevent.date_from.astimezone(self.event_object_cache[order.event_id].timezone).strftime('%Y-%m-%d %H:%M:%S'))
-                if op.subevent.date_to:
-                    row.append(op.subevent.date_to.astimezone(self.event_object_cache[order.event_id].timezone).strftime('%Y-%m-%d %H:%M:%S'))
-                else:
-                    row.append('')
-            else:
-                row.append('')
-                row.append('')
-                row.append('')
+            self._append_subevent_cells(
+                row, op, self.event_object_cache[order.event_id]
+            )
         row += [
             str(op.item),
             str(op.item_id),
@@ -741,29 +794,8 @@ class OrderListExporter(MultiSheetListExporter):
         row.append(order.comment)
         row.append(order.custom_followup_at.strftime("%Y-%m-%d") if order.custom_followup_at else "")
         row.append(op.addon_to.positionid if op.addon_to_id else "")
-        acache = {}
-        for a in op.answers.all():
-            # We do not want to localize Date, Time and Datetime question answers, as those can lead
-            # to difficulties parsing the data (for example 2019-02-01 may become Février, 2019 01 in French).
-            if a.question.type in (Question.TYPE_CHOICE_MULTIPLE, Question.TYPE_CHOICE):
-                acache[a.question_id] = set(o.pk for o in a.options.all())
-            elif a.question.type in Question.UNLOCALIZED_TYPES:
-                acache[a.question_id] = a.answer
-            else:
-                acache[a.question_id] = str(a)
-        for q in questions:
-            if q.type == Question.TYPE_CHOICE_MULTIPLE:
-                if form_data['group_multiple_choice']:
-                    row.append(", ".join(str(o.answer) for o in options[q.pk] if o.pk in acache.get(q.pk, set())))
-                else:
-                    for o in options[q.pk]:
-                        row.append(_('Yes') if o.pk in acache.get(q.pk, set()) else _('No'))
-            elif q.type == Question.TYPE_CHOICE:
-                # Join is only necessary if the question type was modified but also keeps the code simpler here
-                # as we'd otherwise need some [0] and existance checks
-                row.append(", ".join(str(o.answer) for o in options[q.pk] if o.pk in acache.get(q.pk, set())))
-            else:
-                row.append(acache.get(q.pk, ''))
+        acache = self._build_answer_cache(op)
+        self._append_question_cells(row, questions, options, acache, form_data)
 
         row += self._get_invoice_address_row(order, name_scheme, include_custom_field=False)
         row += [
