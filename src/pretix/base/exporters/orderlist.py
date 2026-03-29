@@ -224,6 +224,15 @@ class OrderListExporter(MultiSheetListExporter):
             return qs.annotate(**annotations).filter(**filters)
         return qs
 
+    def _get_p_providers_subquery(self, outer_ref_name='order'):
+        return OrderPayment.objects.filter(
+            order=OuterRef(outer_ref_name),
+            state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED,
+                       OrderPayment.PAYMENT_STATE_PENDING, OrderPayment.PAYMENT_STATE_CREATED),
+        ).values('order').annotate(
+            m=GroupConcat('provider', delimiter=',')
+        ).values('m').order_by()
+
     def orders_qs(self, form_data):
         p_date = OrderPayment.objects.filter(
             order=OuterRef('pk'),
@@ -234,15 +243,7 @@ class OrderListExporter(MultiSheetListExporter):
         ).values(
             'm'
         ).order_by()
-        p_providers = OrderPayment.objects.filter(
-            order=OuterRef('pk'),
-            state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED,
-                       OrderPayment.PAYMENT_STATE_PENDING, OrderPayment.PAYMENT_STATE_CREATED),
-        ).values('order').annotate(
-            m=GroupConcat('provider', delimiter=',')
-        ).values(
-            'm'
-        ).order_by()
+        p_providers = self._get_p_providers_subquery(outer_ref_name='pk')
         i_numbers = Invoice.objects.filter(
             order=OuterRef('pk'),
         ).values('order').annotate(
@@ -460,15 +461,7 @@ class OrderListExporter(MultiSheetListExporter):
             )
 
     def fees_qs(self, form_data):
-        p_providers = OrderPayment.objects.filter(
-            order=OuterRef('order'),
-            state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED,
-                       OrderPayment.PAYMENT_STATE_PENDING, OrderPayment.PAYMENT_STATE_CREATED),
-        ).values('order').annotate(
-            m=GroupConcat('provider', delimiter=',')
-        ).values(
-            'm'
-        ).order_by()
+        p_providers = self._get_p_providers_subquery(outer_ref_name='order')
         qs = OrderFee.all.filter(
             order__event__in=self.events,
         ).annotate(
@@ -819,15 +812,7 @@ class OrderListExporter(MultiSheetListExporter):
     def iterate_positions(self, form_data: dict):
         base_qs = self.positions_qs(form_data)
 
-        p_providers = OrderPayment.objects.filter(
-            order=OuterRef('order'),
-            state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED,
-                       OrderPayment.PAYMENT_STATE_PENDING, OrderPayment.PAYMENT_STATE_CREATED),
-        ).values('order').annotate(
-            m=GroupConcat('provider', delimiter=',')
-        ).values(
-            'm'
-        ).order_by()
+        p_providers = self._get_p_providers_subquery(outer_ref_name='order')
         qs = base_qs.annotate(
             payment_providers=Subquery(p_providers, output_field=CharField()),
             checked_in_lists=Subquery(
