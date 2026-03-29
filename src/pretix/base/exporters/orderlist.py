@@ -275,15 +275,11 @@ class OrderListExporter(MultiSheetListExporter):
             qs = qs.filter(status=Order.STATUS_PAID)
         return qs
 
-    def iterate_orders(self, form_data: dict):
-        qs = self.orders_qs(form_data)
-        tax_rates = self._get_all_tax_rates(qs)
-
+    def _build_order_header_row(self, form_data, qs, tax_rates, name_scheme):
         headers = [
             _('Event slug'), _('Event name'), _('Order code'), _('Order total'), _('Status'), _('Email'),
             _('Phone number'), _('Order date'), _('Order time'), _('Company'), _('Name'),
         ]
-        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme] if not self.is_multievent else None
         if name_scheme and len(name_scheme['fields']) > 1:
             for k, label, w in name_scheme['fields']:
                 headers.append(label)
@@ -315,9 +311,103 @@ class OrderListExporter(MultiSheetListExporter):
             for id, vn in payment_methods:
                 headers.append(_('Paid by {method}').format(method=vn))
 
-        # get meta_data labels from first cached event
         headers += next(iter(self.event_object_cache.values())).meta_data.keys()
-        yield headers
+        return headers
+
+    def _build_order_row(self, order, form_data, qs, tax_rates, name_scheme, sum_cache, fee_sum_cache, full_fee_sum_cache, payment_sum_cache, refund_sum_cache):
+        tz = ZoneInfo(self.event_object_cache[order.event_id].settings.timezone)
+        row = [
+            self.event_object_cache[order.event_id].slug,
+            str(self.event_object_cache[order.event_id].name),
+            order.code,
+            order.total,
+            order.get_extended_status_display(),
+            order.email,
+            str(order.phone) if order.phone else '',
+            order.datetime.astimezone(tz).strftime('%Y-%m-%d'),
+            order.datetime.astimezone(tz).strftime('%H:%M:%S'),
+        ]
+        try:
+            row += [
+                order.invoice_address.company,
+                order.invoice_address.name,
+            ]
+            if name_scheme and len(name_scheme['fields']) > 1:
+                for k, label, w in name_scheme['fields']:
+                    row.append(
+                        get_name_parts_localized(order.invoice_address.name_parts, k)
+                    )
+            row += [
+                order.invoice_address.street,
+                order.invoice_address.zipcode,
+                order.invoice_address.city,
+                order.invoice_address.country if order.invoice_address.country else
+                order.invoice_address.country_old,
+                order.invoice_address.state_for_address,
+                order.invoice_address.custom_field,
+                order.invoice_address.vat_id,
+            ]
+        except InvoiceAddress.DoesNotExist:
+            row += [''] * (9 + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
+
+        row += [
+            order.payment_date.astimezone(tz).strftime('%Y-%m-%d') if order.payment_date else '',
+            full_fee_sum_cache.get(order.id) or Decimal('0.00'),
+            order.locale,
+        ]
+
+        for tr in tax_rates:
+            taxrate_values = sum_cache.get((order.id, tr), {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')})
+            fee_taxrate_values = fee_sum_cache.get((order.id, tr),
+                                                   {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')})
+
+            row += [
+                taxrate_values['grosssum'] + fee_taxrate_values['grosssum'],
+                (
+                    taxrate_values['grosssum'] - taxrate_values['taxsum'] +
+                    fee_taxrate_values['grosssum'] - fee_taxrate_values['taxsum']
+                ),
+                taxrate_values['taxsum'] + fee_taxrate_values['taxsum'],
+            ]
+
+        row.append(order.invoice_numbers)
+        row.append(order.sales_channel)
+        row.append(_('Yes') if order.checkin_attention else _('No'))
+        row.append(order.checkin_text or "")
+        row.append(order.comment or "")
+        row.append(order.custom_followup_at.strftime("%Y-%m-%d") if order.custom_followup_at else "")
+        row.append(order.pcnt)
+        row.append(_('Yes') if order.email_known_to_work else _('No'))
+        row.append(str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '')
+        row.append(', '.join([
+            str(self.providers.get(p, p)) for p in sorted(set((order.payment_providers or '').split(',')))
+            if p and p != 'free'
+        ]))
+
+        row.append(
+            build_absolute_uri(order.event, 'presale:event.order', kwargs={
+                'order': order.code,
+                'secret': order.secret,
+            })
+        )
+
+        if form_data.get('include_payment_amounts'):
+            payment_methods = self._get_all_payment_methods(qs)
+            for id, vn in payment_methods:
+                row.append(
+                    payment_sum_cache.get((order.id, id), Decimal('0.00')) -
+                    refund_sum_cache.get((order.id, id), Decimal('0.00'))
+                )
+        row += self.event_object_cache[order.event_id].meta_data.values()
+        return row
+
+    def iterate_orders(self, form_data: dict):
+        qs = self.orders_qs(form_data)
+        tax_rates = self._get_all_tax_rates(qs)
+
+        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme] if not self.is_multievent else None
+        
+        yield self._build_order_header_row(form_data, qs, tax_rates, name_scheme)
 
         full_fee_sum_cache = {
             o['order__id']: o['grosssum'] for o in
@@ -329,6 +419,9 @@ class OrderListExporter(MultiSheetListExporter):
                 taxsum=Sum('tax_value'), grosssum=Sum('value')
             )
         }
+        
+        payment_sum_cache = {}
+        refund_sum_cache = {}
         if form_data.get('include_payment_amounts'):
             payment_sum_cache = {
                 (o['order__id'], o['provider']): o['grosssum'] for o in
@@ -355,92 +448,7 @@ class OrderListExporter(MultiSheetListExporter):
 
         yield self.ProgressSetTotal(total=qs.count())
         for order in qs.order_by('datetime').iterator():
-            tz = ZoneInfo(self.event_object_cache[order.event_id].settings.timezone)
-
-            row = [
-                self.event_object_cache[order.event_id].slug,
-                str(self.event_object_cache[order.event_id].name),
-                order.code,
-                order.total,
-                order.get_extended_status_display(),
-                order.email,
-                str(order.phone) if order.phone else '',
-                order.datetime.astimezone(tz).strftime('%Y-%m-%d'),
-                order.datetime.astimezone(tz).strftime('%H:%M:%S'),
-            ]
-            try:
-                row += [
-                    order.invoice_address.company,
-                    order.invoice_address.name,
-                ]
-                if name_scheme and len(name_scheme['fields']) > 1:
-                    for k, label, w in name_scheme['fields']:
-                        row.append(
-                            get_name_parts_localized(order.invoice_address.name_parts, k)
-                        )
-                row += [
-                    order.invoice_address.street,
-                    order.invoice_address.zipcode,
-                    order.invoice_address.city,
-                    order.invoice_address.country if order.invoice_address.country else
-                    order.invoice_address.country_old,
-                    order.invoice_address.state_for_address,
-                    order.invoice_address.custom_field,
-                    order.invoice_address.vat_id,
-                ]
-            except InvoiceAddress.DoesNotExist:
-                row += [''] * (9 + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
-
-            row += [
-                order.payment_date.astimezone(tz).strftime('%Y-%m-%d') if order.payment_date else '',
-                full_fee_sum_cache.get(order.id) or Decimal('0.00'),
-                order.locale,
-            ]
-
-            for tr in tax_rates:
-                taxrate_values = sum_cache.get((order.id, tr), {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')})
-                fee_taxrate_values = fee_sum_cache.get((order.id, tr),
-                                                       {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')})
-
-                row += [
-                    taxrate_values['grosssum'] + fee_taxrate_values['grosssum'],
-                    (
-                        taxrate_values['grosssum'] - taxrate_values['taxsum'] +
-                        fee_taxrate_values['grosssum'] - fee_taxrate_values['taxsum']
-                    ),
-                    taxrate_values['taxsum'] + fee_taxrate_values['taxsum'],
-                ]
-
-            row.append(order.invoice_numbers)
-            row.append(order.sales_channel)
-            row.append(_('Yes') if order.checkin_attention else _('No'))
-            row.append(order.checkin_text or "")
-            row.append(order.comment or "")
-            row.append(order.custom_followup_at.strftime("%Y-%m-%d") if order.custom_followup_at else "")
-            row.append(order.pcnt)
-            row.append(_('Yes') if order.email_known_to_work else _('No'))
-            row.append(str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '')
-            row.append(', '.join([
-                str(self.providers.get(p, p)) for p in sorted(set((order.payment_providers or '').split(',')))
-                if p and p != 'free'
-            ]))
-
-            row.append(
-                build_absolute_uri(order.event, 'presale:event.order', kwargs={
-                    'order': order.code,
-                    'secret': order.secret,
-                })
-            )
-
-            if form_data.get('include_payment_amounts'):
-                payment_methods = self._get_all_payment_methods(qs)
-                for id, vn in payment_methods:
-                    row.append(
-                        payment_sum_cache.get((order.id, id), Decimal('0.00')) -
-                        refund_sum_cache.get((order.id, id), Decimal('0.00'))
-                    )
-            row += self.event_object_cache[order.event_id].meta_data.values()
-            yield row
+            yield self._build_order_row(order, form_data, qs, tax_rates, name_scheme, sum_cache, fee_sum_cache, full_fee_sum_cache, payment_sum_cache, refund_sum_cache)
 
     def fees_qs(self, form_data):
         p_providers = OrderPayment.objects.filter(
@@ -609,8 +617,7 @@ class OrderListExporter(MultiSheetListExporter):
             'answers', 'answers__question', 'answers__options'
         )
 
-        has_subevents = self.events.filter(has_subevents=True).exists()
-
+    def _build_position_header_row(self, form_data, has_subevents, name_scheme, questions, meta_data_labels):
         headers = [
             _('Event slug'),
             _('Event name'),
@@ -637,7 +644,6 @@ class OrderListExporter(MultiSheetListExporter):
             _('Tax value'),
             _('Attendee name'),
         ]
-        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme] if not self.is_multievent else None
         if name_scheme and len(name_scheme['fields']) > 1:
             for k, label, w in name_scheme['fields']:
                 headers.append(_('Attendee name') + ': ' + str(label))
@@ -667,7 +673,6 @@ class OrderListExporter(MultiSheetListExporter):
             _('Add-on to position ID'),
         ]
 
-        questions = list(Question.objects.filter(event__in=self.events))
         options = defaultdict(list)
         for q in questions:
             if q.type == Question.TYPE_CHOICE_MULTIPLE:
@@ -707,10 +712,205 @@ class OrderListExporter(MultiSheetListExporter):
             _('Position order link')
         ]
 
-        # get meta_data labels from first cached event
-        meta_data_labels = next(iter(self.event_object_cache.values())).meta_data.keys()
         if has_subevents:
             headers += meta_data_labels
+            
+        return headers, options
+
+    def _build_position_row(self, op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels):
+        order = op.order
+        tz = ZoneInfo(self.event_object_cache[order.event_id].settings.timezone)
+        row = [
+            self.event_object_cache[order.event_id].slug,
+            str(self.event_object_cache[order.event_id].name),
+            order.code,
+            op.positionid,
+            _("canceled") if op.canceled else order.get_extended_status_display(),
+            order.email,
+            str(order.phone) if order.phone else '',
+            order.datetime.astimezone(tz).strftime('%Y-%m-%d'),
+            order.datetime.astimezone(tz).strftime('%H:%M:%S'),
+        ]
+        if has_subevents:
+            if op.subevent:
+                row.append(op.subevent.name)
+                row.append(op.subevent.date_from.astimezone(self.event_object_cache[order.event_id].timezone).strftime('%Y-%m-%d %H:%M:%S'))
+                if op.subevent.date_to:
+                    row.append(op.subevent.date_to.astimezone(self.event_object_cache[order.event_id].timezone).strftime('%Y-%m-%d %H:%M:%S'))
+                else:
+                    row.append('')
+            else:
+                row.append('')
+                row.append('')
+                row.append('')
+        row += [
+            str(op.item),
+            str(op.item_id),
+            str(op.variation) if op.variation else '',
+            str(op.variation_id) if op.variation_id else '',
+            op.price,
+            op.tax_rate,
+            str(op.tax_rule) if op.tax_rule else '',
+            op.tax_value,
+            op.attendee_name,
+        ]
+        if name_scheme and len(name_scheme['fields']) > 1:
+            for k, label, w in name_scheme['fields']:
+                row.append(
+                    get_name_parts_localized(op.attendee_name_parts, k) if op.attendee_name_parts else ''
+                )
+        row += [
+            op.attendee_email,
+            op.company or '',
+            op.street or '',
+            op.zipcode or '',
+            op.city or '',
+            op.country if op.country else '',
+            op.state_for_address or '',
+            op.voucher.code if op.voucher else '',
+            op.voucher_budget_use if op.voucher_budget_use else '',
+            op.voucher.tag if op.voucher else '',
+            op.pseudonymization_id,
+            op.secret,
+        ]
+
+        if op.seat:
+            row += [
+                op.seat.seat_guid,
+                str(op.seat),
+                op.seat.zone_name,
+                op.seat.row_name,
+                op.seat.seat_number,
+            ]
+        else:
+            row += ['', '', '', '', '']
+
+        row += [
+            _('Yes') if op.blocked else '',
+            date_format(op.valid_from.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_from else '',
+            date_format(op.valid_until.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_until else '',
+        ]
+        row.append(order.comment)
+        row.append(order.custom_followup_at.strftime("%Y-%m-%d") if order.custom_followup_at else "")
+        row.append(op.addon_to.positionid if op.addon_to_id else "")
+        acache = {}
+        for a in op.answers.all():
+            # We do not want to localize Date, Time and Datetime question answers, as those can lead
+            # to difficulties parsing the data (for example 2019-02-01 may become Février, 2019 01 in French).
+            if a.question.type in (Question.TYPE_CHOICE_MULTIPLE, Question.TYPE_CHOICE):
+                acache[a.question_id] = set(o.pk for o in a.options.all())
+            elif a.question.type in Question.UNLOCALIZED_TYPES:
+                acache[a.question_id] = a.answer
+            else:
+                acache[a.question_id] = str(a)
+        for q in questions:
+            if q.type == Question.TYPE_CHOICE_MULTIPLE:
+                if form_data['group_multiple_choice']:
+                    row.append(", ".join(str(o.answer) for o in options[q.pk] if o.pk in acache.get(q.pk, set())))
+                else:
+                    for o in options[q.pk]:
+                        row.append(_('Yes') if o.pk in acache.get(q.pk, set()) else _('No'))
+            elif q.type == Question.TYPE_CHOICE:
+                # Join is only necessary if the question type was modified but also keeps the code simpler here
+                # as we'd otherwise need some [0] and existance checks
+                row.append(", ".join(str(o.answer) for o in options[q.pk] if o.pk in acache.get(q.pk, set())))
+            else:
+                row.append(acache.get(q.pk, ''))
+
+        try:
+            row += [
+                order.invoice_address.company,
+                order.invoice_address.name,
+            ]
+            if name_scheme and len(name_scheme['fields']) > 1:
+                for k, label, w in name_scheme['fields']:
+                    row.append(
+                        get_name_parts_localized(order.invoice_address.name_parts, k)
+                    )
+            row += [
+                order.invoice_address.street,
+                order.invoice_address.zipcode,
+                order.invoice_address.city,
+                order.invoice_address.country if order.invoice_address.country else
+                order.invoice_address.country_old,
+                order.invoice_address.state_for_address,
+                order.invoice_address.vat_id,
+            ]
+        except InvoiceAddress.DoesNotExist:
+            row += [''] * (8 + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
+        row += [
+            order.sales_channel,
+            order.locale,
+            _('Yes') if order.email_known_to_work else _('No'),
+            str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '',
+        ]
+        row.append(op.checked_in_lists or "")
+        row.append(', '.join([
+            str(self.providers.get(p, p)) for p in sorted(set((op.payment_providers or '').split(',')))
+            if p and p != 'free'
+        ]))
+
+        row.append(
+            build_absolute_uri(order.event, 'presale:event.order.position', kwargs={
+                'order': order.code,
+                'secret': op.web_secret,
+                'position': op.positionid
+            })
+        )
+
+        if has_subevents:
+            if op.subevent:
+                row += op.subevent.meta_data.values()
+            else:
+                row += [''] * len(meta_data_labels)
+        return row
+
+    def iterate_positions(self, form_data: dict):
+        base_qs = self.positions_qs(form_data)
+
+        p_providers = OrderPayment.objects.filter(
+            order=OuterRef('order'),
+            state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED,
+                       OrderPayment.PAYMENT_STATE_PENDING, OrderPayment.PAYMENT_STATE_CREATED),
+        ).values('order').annotate(
+            m=GroupConcat('provider', delimiter=',')
+        ).values(
+            'm'
+        ).order_by()
+        qs = base_qs.annotate(
+            payment_providers=Subquery(p_providers, output_field=CharField()),
+            checked_in_lists=Subquery(
+                Checkin.objects.filter(
+                    successful=True,
+                    type=Checkin.TYPE_ENTRY,
+                    position=OuterRef("pk"),
+                ).order_by().values("position").annotate(
+                    c=GroupConcat(
+                        "list__name",
+                        # These appear not to work properly on SQLite. Well, we don't support SQLite outside testing
+                        # anyways.
+                        ordered='sqlite' not in settings.DATABASES['default']['ENGINE'],
+                        distinct='sqlite' not in settings.DATABASES['default']['ENGINE'],
+                        delimiter=", "
+                    )
+                ).values("c")
+            ),
+        ).select_related(
+            'order', 'order__invoice_address', 'order__customer', 'item', 'variation',
+            'voucher', 'tax_rule', 'addon_to',
+        ).prefetch_related(
+            'subevent', 'subevent__meta_values',
+            'answers', 'answers__question', 'answers__options'
+        )
+
+        has_subevents = self.events.filter(has_subevents=True).exists()
+        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme] if not self.is_multievent else None
+        questions = list(Question.objects.filter(event__in=self.events))
+        meta_data_labels = next(iter(self.event_object_cache.values())).meta_data.keys()
+
+        headers, options = self._build_position_header_row(
+            form_data, has_subevents, name_scheme, questions, meta_data_labels
+        )
         yield headers
 
         all_ids = list(base_qs.order_by('order__datetime', 'positionid').values_list('pk', flat=True))
@@ -719,152 +919,9 @@ class OrderListExporter(MultiSheetListExporter):
             ops = sorted(qs.filter(id__in=ids), key=lambda k: ids.index(k.pk))
 
             for op in ops:
-                order = op.order
-                tz = ZoneInfo(self.event_object_cache[order.event_id].settings.timezone)
-                row = [
-                    self.event_object_cache[order.event_id].slug,
-                    str(self.event_object_cache[order.event_id].name),
-                    order.code,
-                    op.positionid,
-                    _("canceled") if op.canceled else order.get_extended_status_display(),
-                    order.email,
-                    str(order.phone) if order.phone else '',
-                    order.datetime.astimezone(tz).strftime('%Y-%m-%d'),
-                    order.datetime.astimezone(tz).strftime('%H:%M:%S'),
-                ]
-                if has_subevents:
-                    if op.subevent:
-                        row.append(op.subevent.name)
-                        row.append(op.subevent.date_from.astimezone(self.event_object_cache[order.event_id].timezone).strftime('%Y-%m-%d %H:%M:%S'))
-                        if op.subevent.date_to:
-                            row.append(op.subevent.date_to.astimezone(self.event_object_cache[order.event_id].timezone).strftime('%Y-%m-%d %H:%M:%S'))
-                        else:
-                            row.append('')
-                    else:
-                        row.append('')
-                        row.append('')
-                        row.append('')
-                row += [
-                    str(op.item),
-                    str(op.item_id),
-                    str(op.variation) if op.variation else '',
-                    str(op.variation_id) if op.variation_id else '',
-                    op.price,
-                    op.tax_rate,
-                    str(op.tax_rule) if op.tax_rule else '',
-                    op.tax_value,
-                    op.attendee_name,
-                ]
-                if name_scheme and len(name_scheme['fields']) > 1:
-                    for k, label, w in name_scheme['fields']:
-                        row.append(
-                            get_name_parts_localized(op.attendee_name_parts, k) if op.attendee_name_parts else ''
-                        )
-                row += [
-                    op.attendee_email,
-                    op.company or '',
-                    op.street or '',
-                    op.zipcode or '',
-                    op.city or '',
-                    op.country if op.country else '',
-                    op.state_for_address or '',
-                    op.voucher.code if op.voucher else '',
-                    op.voucher_budget_use if op.voucher_budget_use else '',
-                    op.voucher.tag if op.voucher else '',
-                    op.pseudonymization_id,
-                    op.secret,
-                ]
-
-                if op.seat:
-                    row += [
-                        op.seat.seat_guid,
-                        str(op.seat),
-                        op.seat.zone_name,
-                        op.seat.row_name,
-                        op.seat.seat_number,
-                    ]
-                else:
-                    row += ['', '', '', '', '']
-
-                row += [
-                    _('Yes') if op.blocked else '',
-                    date_format(op.valid_from.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_from else '',
-                    date_format(op.valid_until.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_until else '',
-                ]
-                row.append(order.comment)
-                row.append(order.custom_followup_at.strftime("%Y-%m-%d") if order.custom_followup_at else "")
-                row.append(op.addon_to.positionid if op.addon_to_id else "")
-                acache = {}
-                for a in op.answers.all():
-                    # We do not want to localize Date, Time and Datetime question answers, as those can lead
-                    # to difficulties parsing the data (for example 2019-02-01 may become Février, 2019 01 in French).
-                    if a.question.type in (Question.TYPE_CHOICE_MULTIPLE, Question.TYPE_CHOICE):
-                        acache[a.question_id] = set(o.pk for o in a.options.all())
-                    elif a.question.type in Question.UNLOCALIZED_TYPES:
-                        acache[a.question_id] = a.answer
-                    else:
-                        acache[a.question_id] = str(a)
-                for q in questions:
-                    if q.type == Question.TYPE_CHOICE_MULTIPLE:
-                        if form_data['group_multiple_choice']:
-                            row.append(", ".join(str(o.answer) for o in options[q.pk] if o.pk in acache.get(q.pk, set())))
-                        else:
-                            for o in options[q.pk]:
-                                row.append(_('Yes') if o.pk in acache.get(q.pk, set()) else _('No'))
-                    elif q.type == Question.TYPE_CHOICE:
-                        # Join is only necessary if the question type was modified but also keeps the code simpler here
-                        # as we'd otherwise need some [0] and existance checks
-                        row.append(", ".join(str(o.answer) for o in options[q.pk] if o.pk in acache.get(q.pk, set())))
-                    else:
-                        row.append(acache.get(q.pk, ''))
-
-                try:
-                    row += [
-                        order.invoice_address.company,
-                        order.invoice_address.name,
-                    ]
-                    if name_scheme and len(name_scheme['fields']) > 1:
-                        for k, label, w in name_scheme['fields']:
-                            row.append(
-                                get_name_parts_localized(order.invoice_address.name_parts, k)
-                            )
-                    row += [
-                        order.invoice_address.street,
-                        order.invoice_address.zipcode,
-                        order.invoice_address.city,
-                        order.invoice_address.country if order.invoice_address.country else
-                        order.invoice_address.country_old,
-                        order.invoice_address.state_for_address,
-                        order.invoice_address.vat_id,
-                    ]
-                except InvoiceAddress.DoesNotExist:
-                    row += [''] * (8 + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
-                row += [
-                    order.sales_channel,
-                    order.locale,
-                    _('Yes') if order.email_known_to_work else _('No'),
-                    str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '',
-                ]
-                row.append(op.checked_in_lists or "")
-                row.append(', '.join([
-                    str(self.providers.get(p, p)) for p in sorted(set((op.payment_providers or '').split(',')))
-                    if p and p != 'free'
-                ]))
-
-                row.append(
-                    build_absolute_uri(order.event, 'presale:event.order.position', kwargs={
-                        'order': order.code,
-                        'secret': op.web_secret,
-                        'position': op.positionid
-                    })
+                yield self._build_position_row(
+                    op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels
                 )
-
-                if has_subevents:
-                    if op.subevent:
-                        row += op.subevent.meta_data.values()
-                    else:
-                        row += [''] * len(meta_data_labels)
-                yield row
 
     def get_filename(self):
         if self.is_multievent:
