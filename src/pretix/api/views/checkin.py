@@ -19,6 +19,7 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <https://www.gnu.org/licenses/>.
 #
+import dataclasses
 import operator
 from datetime import timedelta
 from functools import reduce
@@ -451,9 +452,67 @@ def _checkin_list_position_queryset(checkinlists, ignore_status=False, ignore_pr
     return qs
 
 
-def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime, force, checkin_type, ignore_unpaid, nonce,
-                    untrusted_input, user, auth, expand, pdf_data, request, questions_supported, canceled_supported,
-                    source_type='barcode', legacy_url_support=False, simulate=False, gate=None, use_order_locale=False):
+@dataclasses.dataclass
+class RedeemContext:
+    """Groups caller/request-related parameters for _redeem_process().
+
+    Introduced to reduce the function's 21-parameter signature
+    (SonarQube rule python:S107).
+    """
+    user: object
+    auth: object
+    request: object
+    expand: list
+    pdf_data: bool
+
+
+@dataclasses.dataclass
+class RedeemOptions:
+    """Groups check-in behaviour flags for _redeem_process().
+
+    Introduced to reduce the function's 21-parameter signature
+    (SonarQube rule python:S107).
+    """
+    force: bool = False
+    checkin_type: str = 'entry'
+    ignore_unpaid: bool = False
+    nonce: str = None
+    untrusted_input: bool = False
+    questions_supported: bool = True
+    canceled_supported: bool = False
+    source_type: str = 'barcode'
+    legacy_url_support: bool = False
+    simulate: bool = False
+    gate: object = None
+    use_order_locale: bool = False
+
+
+def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
+                    redeem_ctx: RedeemContext, redeem_opts: RedeemOptions,
+                    # Legacy kwargs for backward-compatible call sites
+                    force=False, checkin_type=None, ignore_unpaid=False, nonce=None,
+                    untrusted_input=False, user=None, auth=None, expand=None, pdf_data=False,
+                    request=None, questions_supported=True, canceled_supported=False,
+                    source_type='barcode', legacy_url_support=False, simulate=False,
+                    gate=None, use_order_locale=False):
+    # Build dataclass objects from legacy kwargs if not provided
+    if redeem_ctx is None:
+        redeem_ctx = RedeemContext(
+            user=user, auth=auth, request=request,
+            expand=expand or [], pdf_data=pdf_data,
+        )
+    if redeem_opts is None:
+        redeem_opts = RedeemOptions(
+            force=force, checkin_type=checkin_type or 'entry',
+            ignore_unpaid=ignore_unpaid, nonce=nonce,
+            untrusted_input=untrusted_input,
+            questions_supported=questions_supported,
+            canceled_supported=canceled_supported,
+            source_type=source_type,
+            legacy_url_support=legacy_url_support,
+            simulate=simulate, gate=gate,
+            use_order_locale=use_order_locale,
+        )
     if not checkinlists:
         raise ValidationError('No check-in list passed.')
 
