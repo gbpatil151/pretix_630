@@ -482,14 +482,7 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
     def additional_form_fields(self):
         return self._fields
 
-    def iterate_list(self, form_data):
-        self.cl = cl = self.event.checkin_lists.get(pk=form_data['list'])
-
-        questions = list(Question.objects.filter(event=self.event, id__in=form_data['questions']))
-
-        base_qs = self._get_queryset(cl, form_data, prefetch=False)
-
-        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme]
+    def _build_checkinlist_headers(self, cl, form_data, questions, name_scheme):
         headers = [
             _('Order code'),
             _('Attendee name'),
@@ -539,7 +532,126 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
             _('Country'),
             pgettext('address', 'State'),
         ]
-        yield headers
+        return headers
+
+    def _build_checkinlist_row(self, op, cl, form_data, questions, name_scheme):
+        try:
+            ia = op.order.invoice_address
+        except InvoiceAddress.DoesNotExist:
+            ia = InvoiceAddress()
+
+        last_checked_in = None
+        if isinstance(op.last_checked_in, str):  # SQLite
+            last_checked_in = dateutil.parser.parse(op.last_checked_in)
+        elif op.last_checked_in:
+            last_checked_in = op.last_checked_in
+        if last_checked_in and not is_aware(last_checked_in):
+            last_checked_in = make_aware(last_checked_in, timezone.utc)
+
+        last_checked_out = None
+        if isinstance(op.last_checked_out, str):  # SQLite
+            last_checked_out = dateutil.parser.parse(op.last_checked_out)
+        elif op.last_checked_out:
+            last_checked_out = op.last_checked_out
+        if last_checked_out and not is_aware(last_checked_out):
+            last_checked_out = make_aware(last_checked_out, timezone.utc)
+
+        row = [
+            op.order.code,
+            op.attendee_name or (op.addon_to.attendee_name if op.addon_to else '') or ia.name,
+        ]
+        if len(name_scheme['fields']) > 1:
+            for k, label, w in name_scheme['fields']:
+                v = (
+                    op.attendee_name_parts or
+                    (op.addon_to.attendee_name_parts if op.addon_to else {}) or
+                    ia.name_parts
+                ).get(k, '')
+                if k == "salutation":
+                    v = pgettext("person_name_salutation", v)
+
+                row.append(v)
+        row += [
+            str(op.item) + (" – " + str(op.variation.value) if op.variation else ""),
+            op.price,
+            date_format(last_checked_in.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
+            if last_checked_in else '',
+            date_format(last_checked_out.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
+            if last_checked_out else '',
+            _('Yes') if op.auto_checked_in else _('No'),
+        ]
+        if cl.include_pending:
+            row.append(_('Yes') if op.order.status == Order.STATUS_PAID else _('No'))
+        if form_data['secrets']:
+            row.append(op.secret)
+        row.append(op.attendee_email or (op.addon_to.attendee_email if op.addon_to else '') or op.order.email or '')
+        row.append(str(op.order.phone) if op.order.phone else '')
+        if self.event.has_subevents:
+            row.append(str(op.subevent.name))
+            row.append(date_format(op.subevent.date_from.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT'))
+            if op.subevent.date_to:
+                row.append(
+                    date_format(op.subevent.date_to.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
+                )
+            else:
+                row.append('')
+        acache = {}
+        if op.addon_to:
+            for a in op.addon_to.answers.all():
+                acache[a.question_id] = format_answer_for_export(a)
+        for a in op.answers.all():
+            acache[a.question_id] = format_answer_for_export(a)
+        for q in questions:
+            row.append(acache.get(q.pk, ''))
+
+        row.append(op.company or ia.company)
+        row.append(op.voucher.code if op.voucher else "")
+        row.append(op.order.datetime.astimezone(self.event.timezone).strftime('%Y-%m-%d'))
+        row.append(op.order.datetime.astimezone(self.event.timezone).strftime('%H:%M:%S'))
+        row.append(_('Yes') if op.require_checkin_attention else _('No'))
+        row.append(op.order.comment or "")
+        row.append("\n".join(text for text in [op.order.checkin_text, op.item.checkin_text] if text))
+
+        if op.seat:
+            row += [
+                op.seat.seat_guid,
+                str(op.seat),
+                op.seat.zone_name,
+                op.seat.row_name,
+                op.seat.seat_number,
+            ]
+        else:
+            row += ['', '', '', '', '']
+
+        row += [
+            _('Yes') if op.blocked else '',
+            date_format(op.valid_from, 'SHORT_DATETIME_FORMAT') if op.valid_from else '',
+            date_format(op.valid_until, 'SHORT_DATETIME_FORMAT') if op.valid_until else '',
+        ]
+        if (op.street or op.zipcode or op.city):
+            address = op
+        else:
+            address = ia
+        row += [
+            address.street or '',
+            address.zipcode or '',
+            address.city or '',
+            address.country if address.country else '',
+            address.state or '',
+        ]
+
+        return row
+
+    def iterate_list(self, form_data):
+        self.cl = cl = self.event.checkin_lists.get(pk=form_data['list'])
+
+        questions = list(Question.objects.filter(event=self.event, id__in=form_data['questions']))
+
+        base_qs = self._get_queryset(cl, form_data, prefetch=False)
+
+        name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme]
+        
+        yield self._build_checkinlist_headers(cl, form_data, questions, name_scheme)
 
         qs = base_qs.prefetch_related(
             'answers',
@@ -556,112 +668,7 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
         for ids in chunked_iterable(all_ids, 1000):
             ops = sorted(qs.filter(id__in=ids).order_by(), key=lambda k: ids.index(k.pk))
             for op in ops:
-                try:
-                    ia = op.order.invoice_address
-                except InvoiceAddress.DoesNotExist:
-                    ia = InvoiceAddress()
-
-                last_checked_in = None
-                if isinstance(op.last_checked_in, str):  # SQLite
-                    last_checked_in = dateutil.parser.parse(op.last_checked_in)
-                elif op.last_checked_in:
-                    last_checked_in = op.last_checked_in
-                if last_checked_in and not is_aware(last_checked_in):
-                    last_checked_in = make_aware(last_checked_in, timezone.utc)
-
-                last_checked_out = None
-                if isinstance(op.last_checked_out, str):  # SQLite
-                    last_checked_out = dateutil.parser.parse(op.last_checked_out)
-                elif op.last_checked_out:
-                    last_checked_out = op.last_checked_out
-                if last_checked_out and not is_aware(last_checked_out):
-                    last_checked_out = make_aware(last_checked_out, timezone.utc)
-
-                row = [
-                    op.order.code,
-                    op.attendee_name or (op.addon_to.attendee_name if op.addon_to else '') or ia.name,
-                ]
-                if len(name_scheme['fields']) > 1:
-                    for k, label, w in name_scheme['fields']:
-                        v = (
-                            op.attendee_name_parts or
-                            (op.addon_to.attendee_name_parts if op.addon_to else {}) or
-                            ia.name_parts
-                        ).get(k, '')
-                        if k == "salutation":
-                            v = pgettext("person_name_salutation", v)
-
-                        row.append(v)
-                row += [
-                    str(op.item) + (" – " + str(op.variation.value) if op.variation else ""),
-                    op.price,
-                    date_format(last_checked_in.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
-                    if last_checked_in else '',
-                    date_format(last_checked_out.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
-                    if last_checked_out else '',
-                    _('Yes') if op.auto_checked_in else _('No'),
-                ]
-                if cl.include_pending:
-                    row.append(_('Yes') if op.order.status == Order.STATUS_PAID else _('No'))
-                if form_data['secrets']:
-                    row.append(op.secret)
-                row.append(op.attendee_email or (op.addon_to.attendee_email if op.addon_to else '') or op.order.email or '')
-                row.append(str(op.order.phone) if op.order.phone else '')
-                if self.event.has_subevents:
-                    row.append(str(op.subevent.name))
-                    row.append(date_format(op.subevent.date_from.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT'))
-                    if op.subevent.date_to:
-                        row.append(
-                            date_format(op.subevent.date_to.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
-                        )
-                    else:
-                        row.append('')
-                acache = {}
-                if op.addon_to:
-                    for a in op.addon_to.answers.all():
-                        acache[a.question_id] = format_answer_for_export(a)
-                for a in op.answers.all():
-                    acache[a.question_id] = format_answer_for_export(a)
-                for q in questions:
-                    row.append(acache.get(q.pk, ''))
-
-                row.append(op.company or ia.company)
-                row.append(op.voucher.code if op.voucher else "")
-                row.append(op.order.datetime.astimezone(self.event.timezone).strftime('%Y-%m-%d'))
-                row.append(op.order.datetime.astimezone(self.event.timezone).strftime('%H:%M:%S'))
-                row.append(_('Yes') if op.require_checkin_attention else _('No'))
-                row.append(op.order.comment or "")
-                row.append("\n".join(text for text in [op.order.checkin_text, op.item.checkin_text] if text))
-
-                if op.seat:
-                    row += [
-                        op.seat.seat_guid,
-                        str(op.seat),
-                        op.seat.zone_name,
-                        op.seat.row_name,
-                        op.seat.seat_number,
-                    ]
-                else:
-                    row += ['', '', '', '', '']
-
-                row += [
-                    _('Yes') if op.blocked else '',
-                    date_format(op.valid_from, 'SHORT_DATETIME_FORMAT') if op.valid_from else '',
-                    date_format(op.valid_until, 'SHORT_DATETIME_FORMAT') if op.valid_until else '',
-                ]
-                if (op.street or op.zipcode or op.city):
-                    address = op
-                else:
-                    address = ia
-                row += [
-                    address.street or '',
-                    address.zipcode or '',
-                    address.city or '',
-                    address.country if address.country else '',
-                    address.state or '',
-                ]
-
-                yield row
+                yield self._build_checkinlist_row(op, cl, form_data, questions, name_scheme)
 
     def get_filename(self):
         return '{}_checkin_{}'.format(self.event.slug, safe_for_filename(self.cl.name))
