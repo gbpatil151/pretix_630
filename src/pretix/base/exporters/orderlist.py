@@ -351,14 +351,14 @@ class OrderListExporter(MultiSheetListExporter):
             fee_taxrate_values = fee_sum_cache.get(
                 (order_id, tr), {'grosssum': Decimal('0.00'), 'taxsum': Decimal('0.00')}
             )
-            row += [
+            row.extend([
                 taxrate_values['grosssum'] + fee_taxrate_values['grosssum'],
                 (
                     taxrate_values['grosssum'] - taxrate_values['taxsum'] +
                     fee_taxrate_values['grosssum'] - fee_taxrate_values['taxsum']
                 ),
                 taxrate_values['taxsum'] + fee_taxrate_values['taxsum'],
-            ]
+            ])
 
     def _build_order_row(
         self, order, form_data, qs, tax_rates, name_scheme,
@@ -626,21 +626,7 @@ class OrderListExporter(MultiSheetListExporter):
         ]
 
         options = defaultdict(list)
-        for q in questions:
-            if q.type == Question.TYPE_CHOICE_MULTIPLE:
-                if form_data['group_multiple_choice']:
-                    for o in q.options.all():
-                        options[q.pk].append(o)
-                    headers.append(str(q.question))
-                else:
-                    for o in q.options.all():
-                        headers.append(str(q.question) + ' – ' + str(o.answer))
-                        options[q.pk].append(o)
-            else:
-                if q.type == Question.TYPE_CHOICE:
-                    for o in q.options.all():
-                        options[q.pk].append(o)
-                headers.append(str(q.question))
+        self._build_question_headers(headers, questions, options, form_data)
         headers += [
             _('Invoice address company'),
             _('Invoice address name'),
@@ -668,6 +654,24 @@ class OrderListExporter(MultiSheetListExporter):
             headers += meta_data_labels
 
         return headers, options
+
+    def _build_question_headers(self, headers, questions, options, form_data):
+        """Populate options dict and extend headers with per-question column labels."""
+        for q in questions:
+            if q.type == Question.TYPE_CHOICE_MULTIPLE:
+                if form_data['group_multiple_choice']:
+                    for o in q.options.all():
+                        options[q.pk].append(o)
+                    headers.append(str(q.question))
+                else:
+                    for o in q.options.all():
+                        headers.append(str(q.question) + ' – ' + str(o.answer))
+                        options[q.pk].append(o)
+            else:
+                if q.type == Question.TYPE_CHOICE:
+                    for o in q.options.all():
+                        options[q.pk].append(o)
+                headers.append(str(q.question))
 
     def _append_subevent_cells(self, row, op, event_cache_entry):
         """Append subevent name/start/end date columns to the row."""
@@ -699,20 +703,24 @@ class OrderListExporter(MultiSheetListExporter):
                 acache[a.question_id] = str(a)
         return acache
 
+    def _append_multi_choice_cell(self, row, q, options, acache, form_data):
+        """Append either a grouped or per-option cell for a multiple-choice question."""
+        if form_data['group_multiple_choice']:
+            row.append(
+                ", ".join(
+                    str(o.answer) for o in options[q.pk]
+                    if o.pk in acache.get(q.pk, set())
+                )
+            )
+        else:
+            for o in options[q.pk]:
+                row.append(_('Yes') if o.pk in acache.get(q.pk, set()) else _('No'))
+
     def _append_question_cells(self, row, questions, options, acache, form_data):
         """Append one cell per question (or per option for multi-choice) to the row."""
         for q in questions:
             if q.type == Question.TYPE_CHOICE_MULTIPLE:
-                if form_data['group_multiple_choice']:
-                    row.append(
-                        ", ".join(
-                            str(o.answer) for o in options[q.pk]
-                            if o.pk in acache.get(q.pk, set())
-                        )
-                    )
-                else:
-                    for o in options[q.pk]:
-                        row.append(_('Yes') if o.pk in acache.get(q.pk, set()) else _('No'))
+                self._append_multi_choice_cell(row, q, options, acache, form_data)
             elif q.type == Question.TYPE_CHOICE:
                 # Join is only necessary if the question type was modified but also keeps code simpler
                 row.append(
@@ -723,6 +731,28 @@ class OrderListExporter(MultiSheetListExporter):
                 )
             else:
                 row.append(acache.get(q.pk, ''))
+
+    def _append_position_attendee_cells(self, row, op, name_scheme):
+        """Append the attendee name parts columns to the row."""
+        if name_scheme and len(name_scheme['fields']) > 1:
+            for k, label, w in name_scheme['fields']:
+                row.append(
+                    get_name_parts_localized(op.attendee_name_parts, k)
+                    if op.attendee_name_parts else ''
+                )
+
+    def _append_seat_cells(self, row, op):
+        """Append seat columns (guid/name/zone/row/number) to the row."""
+        if op.seat:
+            row.extend([
+                op.seat.seat_guid,
+                str(op.seat),
+                op.seat.zone_name,
+                op.seat.row_name,
+                op.seat.seat_number,
+            ])
+        else:
+            row.extend(['', '', '', '', ''])
 
     def _build_position_row(
         self, op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels
@@ -755,12 +785,8 @@ class OrderListExporter(MultiSheetListExporter):
             op.tax_value,
             op.attendee_name,
         ]
-        if name_scheme and len(name_scheme['fields']) > 1:
-            for k, label, w in name_scheme['fields']:
-                row.append(
-                    get_name_parts_localized(op.attendee_name_parts, k) if op.attendee_name_parts else ''
-                )
-        row += [
+        self._append_position_attendee_cells(row, op, name_scheme)
+        row.extend([
             op.attendee_email,
             op.company or '',
             op.street or '',
@@ -773,18 +799,8 @@ class OrderListExporter(MultiSheetListExporter):
             op.voucher.tag if op.voucher else '',
             op.pseudonymization_id,
             op.secret,
-        ]
-
-        if op.seat:
-            row += [
-                op.seat.seat_guid,
-                str(op.seat),
-                op.seat.zone_name,
-                op.seat.row_name,
-                op.seat.seat_number,
-            ]
-        else:
-            row += ['', '', '', '', '']
+        ])
+        self._append_seat_cells(row, op)
 
         row += [
             _('Yes') if op.blocked else '',
