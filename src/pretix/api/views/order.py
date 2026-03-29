@@ -825,94 +825,76 @@ class EventOrderViewSet(OrderViewSetMixin, viewsets.ModelViewSet):
             )
         return super().update(request, *args, **kwargs)
 
+    # Mapping of request field name → (log action suffix, data key for new value).
+    # Used by _log_simple_field_change() to deduplicate the repeated
+    # "if field in request.data and changed → log" pattern.
+    _SIMPLE_FIELD_LOG_MAP = {
+        'comment': ('pretix.event.order.comment', 'new_comment'),
+        'custom_followup_at': ('pretix.event.order.custom_followup_at', 'new_custom_followup_at'),
+        'checkin_attention': ('pretix.event.order.checkin_attention', 'new_value'),
+        'checkin_text': ('pretix.event.order.checkin_text', 'new_value'),
+        'valid_if_pending': ('pretix.event.order.valid_if_pending', 'new_value'),
+    }
+
+    def _log_simple_field_change(self, instance, field, action, data_key):
+        """Log a single-field change if the value actually differs."""
+        if field in self.request.data and getattr(instance, field) != self.request.data.get(field):
+            instance.log_action(
+                action,
+                user=self.request.user,
+                auth=self.request.auth,
+                data={data_key: self.request.data.get(field)}
+            )
+
+    def _log_contact_changes(self, instance):
+        """Log email, phone, and locale changes (these need old+new values)."""
+        if 'email' in self.request.data and instance.email != self.request.data.get('email'):
+            instance.email_known_to_work = False
+            instance.log_action(
+                'pretix.event.order.contact.changed',
+                user=self.request.user,
+                auth=self.request.auth,
+                data={
+                    'old_email': instance.email,
+                    'new_email': self.request.data.get('email'),
+                }
+            )
+
+        if 'phone' in self.request.data and instance.phone != self.request.data.get('phone'):
+            instance.log_action(
+                'pretix.event.order.phone.changed',
+                user=self.request.user,
+                auth=self.request.auth,
+                data={
+                    'old_phone': instance.phone,
+                    'new_phone': self.request.data.get('phone'),
+                }
+            )
+
+        if 'locale' in self.request.data and instance.locale != self.request.data.get('locale'):
+            instance.log_action(
+                'pretix.event.order.locale.changed',
+                user=self.request.user,
+                auth=self.request.auth,
+                data={
+                    'old_locale': instance.locale,
+                    'new_locale': self.request.data.get('locale'),
+                }
+            )
+
     def perform_update(self, serializer):
         with transaction.atomic():
-            if 'comment' in self.request.data and serializer.instance.comment != self.request.data.get('comment'):
-                serializer.instance.log_action(
-                    'pretix.event.order.comment',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'new_comment': self.request.data.get('comment')
-                    }
-                )
+            instance = serializer.instance
 
-            if 'custom_followup_at' in self.request.data and serializer.instance.custom_followup_at != self.request.data.get('custom_followup_at'):
-                serializer.instance.log_action(
-                    'pretix.event.order.custom_followup_at',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'new_custom_followup_at': self.request.data.get('custom_followup_at')
-                    }
-                )
+            # Log simple scalar field changes via lookup table
+            for field, (action, data_key) in self._SIMPLE_FIELD_LOG_MAP.items():
+                self._log_simple_field_change(instance, field, action, data_key)
 
-            if 'checkin_attention' in self.request.data and serializer.instance.checkin_attention != self.request.data.get('checkin_attention'):
-                serializer.instance.log_action(
-                    'pretix.event.order.checkin_attention',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'new_value': self.request.data.get('checkin_attention')
-                    }
-                )
-
-            if 'checkin_text' in self.request.data and serializer.instance.checkin_text != self.request.data.get('checkin_text'):
-                serializer.instance.log_action(
-                    'pretix.event.order.checkin_text',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'new_value': self.request.data.get('checkin_text')
-                    }
-                )
-
-            if 'valid_if_pending' in self.request.data and serializer.instance.valid_if_pending != self.request.data.get('valid_if_pending'):
-                serializer.instance.log_action(
-                    'pretix.event.order.valid_if_pending',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'new_value': self.request.data.get('valid_if_pending')
-                    }
-                )
-
-            if 'email' in self.request.data and serializer.instance.email != self.request.data.get('email'):
-                serializer.instance.email_known_to_work = False
-                serializer.instance.log_action(
-                    'pretix.event.order.contact.changed',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'old_email': serializer.instance.email,
-                        'new_email': self.request.data.get('email'),
-                    }
-                )
-
-            if 'phone' in self.request.data and serializer.instance.phone != self.request.data.get('phone'):
-                serializer.instance.log_action(
-                    'pretix.event.order.phone.changed',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'old_phone': serializer.instance.phone,
-                        'new_phone': self.request.data.get('phone'),
-                    }
-                )
-
-            if 'locale' in self.request.data and serializer.instance.locale != self.request.data.get('locale'):
-                serializer.instance.log_action(
-                    'pretix.event.order.locale.changed',
-                    user=self.request.user,
-                    auth=self.request.auth,
-                    data={
-                        'old_locale': serializer.instance.locale,
-                        'new_locale': self.request.data.get('locale'),
-                    }
-                )
+            # Log contact-info changes (need old + new values)
+            self._log_contact_changes(instance)
 
             if 'invoice_address' in self.request.data:
-                serializer.instance.log_action(
+                instance.log_action(
                     'pretix.event.order.modified',
                     user=self.request.user,
                     auth=self.request.auth,
@@ -922,10 +904,10 @@ class EventOrderViewSet(OrderViewSetMixin, viewsets.ModelViewSet):
                 )
 
             serializer.save()
-            tickets.invalidate_cache.apply_async(kwargs={'event': serializer.instance.event.pk, 'order': serializer.instance.pk})
+            tickets.invalidate_cache.apply_async(kwargs={'event': instance.event.pk, 'order': instance.pk})
 
         if 'invoice_address' in self.request.data:
-            order_modified.send(sender=serializer.instance.event, order=serializer.instance)
+            order_modified.send(sender=instance.event, order=instance)
 
     def perform_create(self, serializer):
         try:
