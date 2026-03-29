@@ -275,6 +275,33 @@ class OrderListExporter(MultiSheetListExporter):
             qs = qs.filter(status=Order.STATUS_PAID)
         return qs
 
+    def _get_invoice_address_row(self, order, name_scheme, include_custom_field=False):
+        row = []
+        try:
+            row += [
+                order.invoice_address.company,
+                order.invoice_address.name,
+            ]
+            if name_scheme and len(name_scheme['fields']) > 1:
+                for k, label, w in name_scheme['fields']:
+                    row.append(
+                        get_name_parts_localized(order.invoice_address.name_parts, k)
+                    )
+            row += [
+                order.invoice_address.street,
+                order.invoice_address.zipcode,
+                order.invoice_address.city,
+                order.invoice_address.country if order.invoice_address.country else
+                order.invoice_address.country_old,
+                order.invoice_address.state_for_address,
+            ]
+            if include_custom_field:
+                row.append(order.invoice_address.custom_field)
+            row.append(order.invoice_address.vat_id)
+        except InvoiceAddress.DoesNotExist:
+            row += [''] * ((9 if include_custom_field else 8) + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
+        return row
+
     def _build_order_header_row(self, form_data, qs, tax_rates, name_scheme):
         headers = [
             _('Event slug'), _('Event name'), _('Order code'), _('Order total'), _('Status'), _('Email'),
@@ -327,28 +354,7 @@ class OrderListExporter(MultiSheetListExporter):
             order.datetime.astimezone(tz).strftime('%Y-%m-%d'),
             order.datetime.astimezone(tz).strftime('%H:%M:%S'),
         ]
-        try:
-            row += [
-                order.invoice_address.company,
-                order.invoice_address.name,
-            ]
-            if name_scheme and len(name_scheme['fields']) > 1:
-                for k, label, w in name_scheme['fields']:
-                    row.append(
-                        get_name_parts_localized(order.invoice_address.name_parts, k)
-                    )
-            row += [
-                order.invoice_address.street,
-                order.invoice_address.zipcode,
-                order.invoice_address.city,
-                order.invoice_address.country if order.invoice_address.country else
-                order.invoice_address.country_old,
-                order.invoice_address.state_for_address,
-                order.invoice_address.custom_field,
-                order.invoice_address.vat_id,
-            ]
-        except InvoiceAddress.DoesNotExist:
-            row += [''] * (9 + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
+        row += self._get_invoice_address_row(order, name_scheme, include_custom_field=True)
 
         row += [
             order.payment_date.astimezone(tz).strftime('%Y-%m-%d') if order.payment_date else '',
@@ -406,7 +412,7 @@ class OrderListExporter(MultiSheetListExporter):
         tax_rates = self._get_all_tax_rates(qs)
 
         name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme] if not self.is_multievent else None
-        
+
         yield self._build_order_header_row(form_data, qs, tax_rates, name_scheme)
 
         full_fee_sum_cache = {
@@ -419,7 +425,7 @@ class OrderListExporter(MultiSheetListExporter):
                 taxsum=Sum('tax_value'), grosssum=Sum('value')
             )
         }
-        
+
         payment_sum_cache = {}
         refund_sum_cache = {}
         if form_data.get('include_payment_amounts'):
@@ -448,7 +454,10 @@ class OrderListExporter(MultiSheetListExporter):
 
         yield self.ProgressSetTotal(total=qs.count())
         for order in qs.order_by('datetime').iterator():
-            yield self._build_order_row(order, form_data, qs, tax_rates, name_scheme, sum_cache, fee_sum_cache, full_fee_sum_cache, payment_sum_cache, refund_sum_cache)
+            yield self._build_order_row(
+                order, form_data, qs, tax_rates, name_scheme, sum_cache,
+                fee_sum_cache, full_fee_sum_cache, payment_sum_cache, refund_sum_cache
+            )
 
     def fees_qs(self, form_data):
         p_providers = OrderPayment.objects.filter(
@@ -579,44 +588,6 @@ class OrderListExporter(MultiSheetListExporter):
         qs = self._date_filter(qs, form_data, rel='order__')
         return qs
 
-    def iterate_positions(self, form_data: dict):
-        base_qs = self.positions_qs(form_data)
-
-        p_providers = OrderPayment.objects.filter(
-            order=OuterRef('order'),
-            state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED,
-                       OrderPayment.PAYMENT_STATE_PENDING, OrderPayment.PAYMENT_STATE_CREATED),
-        ).values('order').annotate(
-            m=GroupConcat('provider', delimiter=',')
-        ).values(
-            'm'
-        ).order_by()
-        qs = base_qs.annotate(
-            payment_providers=Subquery(p_providers, output_field=CharField()),
-            checked_in_lists=Subquery(
-                Checkin.objects.filter(
-                    successful=True,
-                    type=Checkin.TYPE_ENTRY,
-                    position=OuterRef("pk"),
-                ).order_by().values("position").annotate(
-                    c=GroupConcat(
-                        "list__name",
-                        # These appear not to work properly on SQLite. Well, we don't support SQLite outside testing
-                        # anyways.
-                        ordered='sqlite' not in settings.DATABASES['default']['ENGINE'],
-                        distinct='sqlite' not in settings.DATABASES['default']['ENGINE'],
-                        delimiter=", "
-                    )
-                ).values("c")
-            ),
-        ).select_related(
-            'order', 'order__invoice_address', 'order__customer', 'item', 'variation',
-            'voucher', 'tax_rule', 'addon_to',
-        ).prefetch_related(
-            'subevent', 'subevent__meta_values',
-            'answers', 'answers__question', 'answers__options'
-        )
-
     def _build_position_header_row(self, form_data, has_subevents, name_scheme, questions, meta_data_labels):
         headers = [
             _('Event slug'),
@@ -714,7 +685,7 @@ class OrderListExporter(MultiSheetListExporter):
 
         if has_subevents:
             headers += meta_data_labels
-            
+
         return headers, options
 
     def _build_position_row(self, op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels):
@@ -817,27 +788,7 @@ class OrderListExporter(MultiSheetListExporter):
             else:
                 row.append(acache.get(q.pk, ''))
 
-        try:
-            row += [
-                order.invoice_address.company,
-                order.invoice_address.name,
-            ]
-            if name_scheme and len(name_scheme['fields']) > 1:
-                for k, label, w in name_scheme['fields']:
-                    row.append(
-                        get_name_parts_localized(order.invoice_address.name_parts, k)
-                    )
-            row += [
-                order.invoice_address.street,
-                order.invoice_address.zipcode,
-                order.invoice_address.city,
-                order.invoice_address.country if order.invoice_address.country else
-                order.invoice_address.country_old,
-                order.invoice_address.state_for_address,
-                order.invoice_address.vat_id,
-            ]
-        except InvoiceAddress.DoesNotExist:
-            row += [''] * (8 + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
+        row += self._get_invoice_address_row(order, name_scheme, include_custom_field=False)
         row += [
             order.sales_channel,
             order.locale,
