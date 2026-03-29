@@ -342,7 +342,11 @@ class OrderListExporter(MultiSheetListExporter):
         headers += next(iter(self.event_object_cache.values())).meta_data.keys()
         return headers
 
-    def _build_order_row(self, order, form_data, qs, tax_rates, name_scheme, sum_cache, fee_sum_cache, full_fee_sum_cache, payment_sum_cache, refund_sum_cache):
+    def _build_order_row(
+        self, order, form_data, qs, tax_rates, name_scheme,
+        sum_cache, fee_sum_cache, full_fee_sum_cache,
+        payment_sum_cache, refund_sum_cache
+    ):
         tz = ZoneInfo(self.event_object_cache[order.event_id].settings.timezone)
         row = [
             self.event_object_cache[order.event_id].slug,
@@ -537,27 +541,7 @@ class OrderListExporter(MultiSheetListExporter):
                 str(op.tax_rule) if op.tax_rule else '',
                 op.tax_value,
             ]
-            try:
-                row += [
-                    order.invoice_address.company,
-                    order.invoice_address.name,
-                ]
-                if name_scheme and len(name_scheme['fields']) > 1:
-                    for k, label, w in name_scheme['fields']:
-                        row.append(
-                            get_name_parts_localized(order.invoice_address.name_parts, k)
-                        )
-                row += [
-                    order.invoice_address.street,
-                    order.invoice_address.zipcode,
-                    order.invoice_address.city,
-                    order.invoice_address.country if order.invoice_address.country else
-                    order.invoice_address.country_old,
-                    order.invoice_address.state_for_address,
-                    order.invoice_address.vat_id,
-                ]
-            except InvoiceAddress.DoesNotExist:
-                row += [''] * (8 + (len(name_scheme['fields']) if name_scheme and len(name_scheme['fields']) > 1 else 0))
+            row += self._get_invoice_address_row(order, name_scheme, include_custom_field=False)
             row.append(str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '')
             row.append(', '.join([
                 str(self.providers.get(p, p)) for p in sorted(set((op.payment_providers or '').split(',')))
