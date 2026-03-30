@@ -38,6 +38,7 @@ import logging
 import operator
 import sys
 from collections import Counter, defaultdict, namedtuple
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from functools import reduce
@@ -126,6 +127,23 @@ class OrderError(Exception):
             # also translate with _/gettext to keep it backwards compatible
             msg = _(str(msg))
         super().__init__(msg)
+
+
+@dataclass
+class CancellationParams:
+    """
+    Parameters for :func:`_cancel_order` (groups optional context; SonarQube python:S107).
+    """
+    user: Optional[object] = None
+    send_mail: bool = True
+    api_token: Optional[object] = None
+    device: Optional[object] = None
+    oauth_application: Optional[object] = None
+    cancellation_fee: Optional[Decimal] = None
+    keep_fees: Optional[object] = None
+    cancel_invoice: bool = True
+    comment: Optional[str] = None
+    tax_mode: Optional[str] = None
 
 
 error_messages = {
@@ -352,7 +370,14 @@ def mark_order_refunded(order, user=None, auth=None, api_token=None):
     device = auth.pk if isinstance(auth, Device) else None
     api_token = (api_token.pk if api_token else None) or (auth if isinstance(auth, TeamAPIToken) else None)
     return _cancel_order(
-        order.pk, user.pk if user else None, send_mail=False, api_token=api_token, device=device, oauth_application=oautha
+        order.pk,
+        CancellationParams(
+            user=user.pk if user else None,
+            send_mail=False,
+            api_token=api_token,
+            device=device,
+            oauth_application=oautha,
+        ),
     )
 
 
@@ -699,13 +724,22 @@ def _cancel_order_try_cancel_open_payments(order, user, api_token, device, oauth
             )
 
 
-def _cancel_order(order, user=None, send_mail: bool=True, api_token=None, device=None, oauth_application=None,
-                  cancellation_fee=None, keep_fees=None, cancel_invoice=True, comment=None, tax_mode=None):
+def _cancel_order(order, params: CancellationParams):
     """
     Mark this order as canceled
     :param order: The order to change
-    :param user: The user that performed the change
+    :param params: Cancellation context (user, mail, fees, etc.)
     """
+    user = params.user
+    send_mail = params.send_mail
+    api_token = params.api_token
+    device = params.device
+    oauth_application = params.oauth_application
+    cancellation_fee = params.cancellation_fee
+    keep_fees = params.keep_fees
+    cancel_invoice = params.cancel_invoice
+    comment = params.comment
+    tax_mode = params.tax_mode
     # If new actions are added to this function, make sure to add the reverse operation to reactivate_order()
     with transaction.atomic():
         if isinstance(order, int):
@@ -3342,8 +3376,19 @@ def cancel_order(self, order: int, user: int=None, send_mail: bool=True, api_tok
                  email_comment=None, refund_comment=None, cancel_invoice=True):
     try:
         try:
-            ret = _cancel_order(order, user, send_mail, api_token, device, oauth_application,
-                                cancellation_fee, cancel_invoice=cancel_invoice, comment=email_comment)
+            ret = _cancel_order(
+                order,
+                CancellationParams(
+                    user=user,
+                    send_mail=send_mail,
+                    api_token=api_token,
+                    device=device,
+                    oauth_application=oauth_application,
+                    cancellation_fee=cancellation_fee,
+                    cancel_invoice=cancel_invoice,
+                    comment=email_comment,
+                ),
+            )
             if try_auto_refund:
                 _try_auto_refund(order, refund_as_giftcard=refund_as_giftcard,
                                  comment=refund_comment)

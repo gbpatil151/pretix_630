@@ -38,7 +38,7 @@ from pretix.base.models import (
 from pretix.base.services.locking import LockTimeoutException
 from pretix.base.services.mail import mail
 from pretix.base.services.orders import (
-    OrderChangeManager, OrderError, _cancel_order, _try_auto_refund,
+    CancellationParams, OrderChangeManager, OrderError, _cancel_order, _try_auto_refund,
 )
 from pretix.base.services.tasks import ProfiledEventTask
 from pretix.base.services.tax import split_fee_for_taxes
@@ -256,7 +256,15 @@ def cancel_event(self, event: Event, subevent: int, auto_refund: bool,
             if dry_run:
                 refund_total += max(Decimal("0.00"), min(payment_refund_sum, o.total - fee))
             else:
-                _cancel_order(o.pk, user, send_mail=False, cancellation_fee=fee, keep_fees=keep_fee_objects)
+                _cancel_order(
+                    o.pk,
+                    CancellationParams(
+                        user=user,
+                        send_mail=False,
+                        cancellation_fee=fee,
+                        keep_fees=keep_fee_objects,
+                    ),
+                )
                 refund_amount = payment_refund_sum
                 refund_amount += refund_total
 
