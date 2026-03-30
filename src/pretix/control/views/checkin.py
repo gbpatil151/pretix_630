@@ -48,7 +48,9 @@ from django.utils.translation import gettext_lazy as _
 from django.views.generic import FormView, ListView, TemplateView
 from i18nfield.strings import LazyI18nString
 
-from pretix.api.views.checkin import _redeem_process
+from pretix.api.views.checkin import (
+    RedeemContext, RedeemOptions, _redeem_process,
+)
 from pretix.base.media import MEDIA_TYPES
 from pretix.base.models import Checkin, LogEntry, Order, OrderPosition
 from pretix.base.models.checkin import CheckinList
@@ -539,21 +541,19 @@ class CheckInListSimulator(EventPermissionRequiredMixin, FormView):
             raw_barcode=form.cleaned_data["raw_barcode"],
             answers_data={},
             datetime=form.cleaned_data["datetime"],
-            force=False,
-            checkin_type=form.cleaned_data["checkin_type"],
-            ignore_unpaid=form.cleaned_data["ignore_unpaid"],
-            untrusted_input=True,
-            user=self.request.user,
-            auth=None,
-            expand=[],
-            nonce=secrets.token_hex(12),
-            pdf_data=False,
-            questions_supported=form.cleaned_data["questions_supported"],
-            canceled_supported=False,
-            request=self.request,  # this is not clean, but we need it in the serializers for URL generation
-            legacy_url_support=False,
-            simulate=True,
-            gate=form.cleaned_data.get("gate"),
+            redeem_ctx=RedeemContext(
+                user=self.request.user,
+                request=self.request,
+            ),
+            redeem_opts=RedeemOptions(
+                checkin_type=form.cleaned_data["checkin_type"],
+                ignore_unpaid=form.cleaned_data["ignore_unpaid"],
+                untrusted_input=True,
+                nonce=secrets.token_hex(12),
+                questions_supported=form.cleaned_data["questions_supported"],
+                simulate=True,
+                gate=form.cleaned_data.get("gate"),
+            )
         ).data
 
         if self.result.get("position"):

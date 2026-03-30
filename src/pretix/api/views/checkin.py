@@ -459,11 +459,11 @@ class RedeemContext:
     Introduced to reduce the function's 21-parameter signature
     (SonarQube rule python:S107).
     """
-    user: object
-    auth: object
-    request: object
-    expand: list
-    pdf_data: bool
+    user: object = None
+    auth: object = None
+    request: object = None
+    expand: list = dataclasses.field(default_factory=list)
+    pdf_data: bool = False
 
 
 @dataclasses.dataclass
@@ -488,84 +488,60 @@ class RedeemOptions:
 
 
 def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
-                    redeem_ctx: RedeemContext, redeem_opts: RedeemOptions,
-                    # Legacy kwargs for backward-compatible call sites
-                    force=False, checkin_type=None, ignore_unpaid=False, nonce=None,
-                    untrusted_input=False, user=None, auth=None, expand=None, pdf_data=False,
-                    request=None, questions_supported=True, canceled_supported=False,
-                    source_type='barcode', legacy_url_support=False, simulate=False,
-                    gate=None, use_order_locale=False):
-    # Build dataclass objects from legacy kwargs if not provided
-    if redeem_ctx is None:
-        redeem_ctx = RedeemContext(
-            user=user, auth=auth, request=request,
-            expand=expand or [], pdf_data=pdf_data,
-        )
-    if redeem_opts is None:
-        redeem_opts = RedeemOptions(
-            force=force, checkin_type=checkin_type or 'entry',
-            ignore_unpaid=ignore_unpaid, nonce=nonce,
-            untrusted_input=untrusted_input,
-            questions_supported=questions_supported,
-            canceled_supported=canceled_supported,
-            source_type=source_type,
-            legacy_url_support=legacy_url_support,
-            simulate=simulate, gate=gate,
-            use_order_locale=use_order_locale,
-        )
+                    redeem_ctx: RedeemContext, redeem_opts: RedeemOptions):
     if not checkinlists:
         raise ValidationError('No check-in list passed.')
 
     list_by_event = {cl.event_id: cl for cl in checkinlists}
     prefetch_related_objects([cl for cl in checkinlists if not cl.all_products], 'limit_products')
 
-    device = auth if isinstance(auth, Device) else None
-    gate = gate or (auth.gate if isinstance(auth, Device) else None)
+    device = redeem_ctx.auth if isinstance(redeem_ctx.auth, Device) else None
+    gate = redeem_opts.gate or (redeem_ctx.auth.gate if isinstance(redeem_ctx.auth, Device) else None)
 
     context = {
-        'request': request,
-        'expand': expand,
+        'request': redeem_ctx.request,
+        'expand': redeem_ctx.expand,
     }
 
     def _make_context(context, event):
         return {
             **context,
             'event': op.order.event,
-            'pdf_data': pdf_data and (
-                user if user and user.is_authenticated else auth
-            ).has_event_permission(request.organizer, event, 'can_view_orders', request),
+            'pdf_data': redeem_ctx.pdf_data and (
+                redeem_ctx.user if redeem_ctx.user and redeem_ctx.user.is_authenticated else redeem_ctx.auth
+            ).has_event_permission(redeem_ctx.request.organizer, event, 'can_view_orders', redeem_ctx.request),
         }
 
     common_checkin_args = dict(
         raw_barcode=raw_barcode,
-        raw_source_type=source_type,
-        type=checkin_type,
+        raw_source_type=redeem_opts.source_type,
+        type=redeem_opts.checkin_type,
         list=checkinlists[0],
         datetime=datetime,
         device=device,
-        gate=gate,
-        nonce=nonce,
-        forced=force,
+        gate=redeem_opts.gate,
+        nonce=redeem_opts.nonce,
+        forced=redeem_opts.force,
     )
     raw_barcode_for_checkin = None
     from_revoked_secret = False
-    if simulate:
+    if redeem_opts.simulate:
         common_checkin_args['__fake_arg_to_prevent_this_from_being_saved'] = True
 
     # 1. Gather a list of positions that could be the one we looking for, either from their ID, secret or
     #    parent secret
-    queryset = _checkin_list_position_queryset(checkinlists, pdf_data=pdf_data, ignore_status=True, ignore_products=True).order_by(
+    queryset = _checkin_list_position_queryset(checkinlists, pdf_data=redeem_ctx.pdf_data, ignore_status=True, ignore_products=True).order_by(
         F('addon_to').asc(nulls_first=True)
     )
 
     q = Q(secret=raw_barcode)
     if any(cl.addon_match for cl in checkinlists):
         q |= Q(addon_to__secret=raw_barcode)
-    if raw_barcode.isnumeric() and not untrusted_input and legacy_url_support:
+    if raw_barcode.isnumeric() and not redeem_opts.untrusted_input and redeem_opts.legacy_url_support:
         q |= Q(pk=raw_barcode)
 
     op_candidates = list(queryset.filter(q))
-    if not op_candidates and '+' in raw_barcode and legacy_url_support:
+    if not op_candidates and '+' in raw_barcode and redeem_opts.legacy_url_support:
         # In application/x-www-form-urlencoded, you can encodes space ' ' with '+' instead of '%20'.
         # `id`, however, is part of a path where this technically is not allowed. Old versions of our
         # scan apps still do it, so we try work around it!
@@ -576,12 +552,12 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
 
     # 2. Handle the "nothing found" case: Either it's really a bogus secret that we don't know (-> error), or it
     #    might be a revoked one that we actually know (-> error, but with better error message and logging and
-    #    with respecting the force option), or it's a reusable medium (-> proceed with that)
+    #    with respecting the redeem_opts.force option), or it's a reusable medium (-> proceed with that)
     if not op_candidates:
         try:
             media = ReusableMedium.objects.select_related('linked_orderposition').active().get(
                 organizer_id=checkinlists[0].event.organizer_id,
-                type=source_type,
+                type=redeem_opts.source_type,
                 identifier=raw_barcode,
                 linked_orderposition__isnull=False,
             )
@@ -590,14 +566,14 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
             revoked_matches = list(
                 RevokedTicketSecret.objects.filter(event_id__in=list_by_event.keys(), secret=raw_barcode))
             if len(revoked_matches) == 0:
-                if not simulate:
+                if not redeem_opts.simulate:
                     checkinlists[0].event.log_action('pretix.event.checkin.unknown', data={
                         'datetime': datetime,
-                        'type': checkin_type,
+                        'type': redeem_opts.checkin_type,
                         'list': checkinlists[0].pk,
                         'barcode': raw_barcode,
                         'searched_lists': [cl.pk for cl in checkinlists]
-                    }, user=user, auth=auth)
+                    }, user=redeem_ctx.user, auth=redeem_ctx.auth)
 
                 for cl in checkinlists:
                     for k, s in cl.event.ticket_secret_generators.items():
@@ -611,7 +587,7 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
                         except:
                             pass
 
-                if not simulate:
+                if not redeem_opts.simulate:
                     Checkin.objects.create(
                         position=None,
                         successful=False,
@@ -619,14 +595,14 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
                         **common_checkin_args,
                     )
 
-                if force and legacy_url_support and isinstance(auth, Device):
+                if redeem_opts.force and redeem_opts.legacy_url_support and isinstance(redeem_ctx.auth, Device):
                     # There was a bug in libpretixsync: If you scanned a ticket in offline mode that was
                     # valid at the time but no longer exists at time of upload, the device would retry to
                     # upload the same scan over and over again. Since we can't update all devices quickly,
                     # here's a dirty workaround to make it stop.
                     try:
-                        brand = auth.software_brand
-                        ver = parse(auth.software_version)
+                        brand = redeem_ctx.auth.software_brand
+                        ver = parse(redeem_ctx.auth.software_version)
                         legacy_mode = (
                             (brand == 'pretixSCANPROXY' and ver < parse('0.0.3')) or
                             (brand == 'pretixSCAN Android' and ver < parse('1.11.2')) or
@@ -653,7 +629,7 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
                     'checkin_texts': [],
                     'list': MiniCheckinListSerializer(checkinlists[0]).data,
                 }, status=404)
-            elif revoked_matches and force:
+            elif revoked_matches and redeem_opts.force:
                 op_candidates = [revoked_matches[0].position]
                 if list_by_event[revoked_matches[0].event_id].addon_match:
                     op_candidates += list(revoked_matches[0].position.addons.all())
@@ -661,13 +637,13 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
                 from_revoked_secret = True
             else:
                 op = revoked_matches[0].position
-                if not simulate:
+                if not redeem_opts.simulate:
                     op.order.log_action('pretix.event.checkin.revoked', data={
                         'datetime': datetime,
-                        'type': checkin_type,
+                        'type': redeem_opts.checkin_type,
                         'list': list_by_event[revoked_matches[0].event_id].pk,
                         'barcode': raw_barcode
-                    }, user=user, auth=auth)
+                    }, user=redeem_ctx.user, auth=redeem_ctx.auth)
                     common_checkin_args['list'] = list_by_event[revoked_matches[0].event_id]
                     Checkin.objects.create(
                         position=op,
@@ -688,14 +664,14 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
         else:
             if media.linked_orderposition.order.event_id not in list_by_event:
                 # Medium exists but connected ticket is for the wrong event
-                if not simulate:
+                if not redeem_opts.simulate:
                     checkinlists[0].event.log_action('pretix.event.checkin.unknown', data={
                         'datetime': datetime,
-                        'type': checkin_type,
+                        'type': redeem_opts.checkin_type,
                         'list': checkinlists[0].pk,
                         'barcode': raw_barcode,
                         'searched_lists': [cl.pk for cl in checkinlists]
-                    }, user=user, auth=auth)
+                    }, user=redeem_ctx.user, auth=redeem_ctx.auth)
                     Checkin.objects.create(
                         position=None,
                         successful=False,
@@ -723,7 +699,7 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
         op_candidates_matching_product = [
             op for op in op_candidates
             if (
-                (list_by_event[op.order.event_id].addon_match or op.secret == raw_barcode or legacy_url_support) and
+                (list_by_event[op.order.event_id].addon_match or op.secret == raw_barcode or redeem_opts.legacy_url_support) and
                 (list_by_event[op.order.event_id].all_products or op.item_id in {i.pk for i in list_by_event[op.order.event_id].limit_products.all()})
             )
         ]
@@ -738,17 +714,17 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
             # We choose the first match (regardless of product) for the logging since it's most likely to be the
             # base product according to our order_by above.
             op = op_candidates[0]
-            if not simulate:
+            if not redeem_opts.simulate:
                 op.order.log_action('pretix.event.checkin.denied', data={
                     'position': op.id,
                     'positionid': op.positionid,
                     'errorcode': Checkin.REASON_AMBIGUOUS,
                     'reason_explanation': None,
-                    'force': force,
+                    'force': redeem_opts.force,
                     'datetime': datetime,
-                    'type': checkin_type,
+                    'type': redeem_opts.checkin_type,
                     'list': list_by_event[op.order.event_id].pk,
-                }, user=user, auth=auth)
+                }, user=redeem_ctx.user, auth=redeem_ctx.auth)
                 common_checkin_args['list'] = list_by_event[op.order.event_id]
                 Checkin.objects.create(
                     position=op,
@@ -779,14 +755,14 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
             if str(q.pk) in answers_data:
                 try:
                     if q.type == Question.TYPE_FILE:
-                        given_answers[q] = _handle_file_upload(answers_data[str(q.pk)], user, auth)
+                        given_answers[q] = _handle_file_upload(answers_data[str(q.pk)], redeem_ctx.user, redeem_ctx.auth)
                     else:
                         given_answers[q] = q.clean_answer(answers_data[str(q.pk)])
                 except (ValidationError, BaseValidationError):
                     pass
 
     # 6. Pass to our actual check-in logic
-    if use_order_locale:
+    if redeem_opts.use_order_locale:
         locale = op.order.locale
     else:
         locale = op.order.event.settings.locale
@@ -796,20 +772,20 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
                 op=op,
                 clist=list_by_event[op.order.event_id],
                 given_answers=given_answers,
-                force=force,
-                ignore_unpaid=ignore_unpaid,
-                nonce=nonce,
+                force=redeem_opts.force,
+                ignore_unpaid=redeem_opts.ignore_unpaid,
+                nonce=redeem_opts.nonce,
                 datetime=datetime,
-                questions_supported=questions_supported,
-                canceled_supported=canceled_supported,
-                user=user,
-                auth=auth,
-                type=checkin_type,
+                questions_supported=redeem_opts.questions_supported,
+                canceled_supported=redeem_opts.canceled_supported,
+                user=redeem_ctx.user,
+                auth=redeem_ctx.auth,
+                type=redeem_opts.checkin_type,
                 raw_barcode=raw_barcode_for_checkin,
-                raw_source_type=source_type,
+                raw_source_type=redeem_opts.source_type,
                 from_revoked_secret=from_revoked_secret,
-                simulate=simulate,
-                gate=gate,
+                simulate=redeem_opts.simulate,
+                gate=redeem_opts.gate,
             )
         except RequiredQuestionsError as e:
             return Response({
@@ -823,17 +799,17 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
                 'list': MiniCheckinListSerializer(list_by_event[op.order.event_id]).data,
             }, status=400)
         except CheckInError as e:
-            if not simulate:
+            if not redeem_opts.simulate:
                 op.order.log_action('pretix.event.checkin.denied', data={
                     'position': op.id,
                     'positionid': op.positionid,
                     'errorcode': e.code,
                     'reason_explanation': e.reason,
-                    'force': force,
+                    'force': redeem_opts.force,
                     'datetime': datetime,
-                    'type': checkin_type,
+                    'type': redeem_opts.checkin_type,
                     'list': list_by_event[op.order.event_id].pk,
-                }, user=user, auth=auth)
+                }, user=redeem_ctx.user, auth=redeem_ctx.auth)
                 Checkin.objects.create(
                     position=op,
                     successful=False,
@@ -960,19 +936,23 @@ class CheckinListPositionViewSet(viewsets.ReadOnlyModelViewSet):
             raw_barcode=kwargs['pk'],
             answers_data=answers_data,
             datetime=dt,
-            force=force,
-            checkin_type=checkin_type,
-            ignore_unpaid=ignore_unpaid,
-            nonce=nonce,
-            untrusted_input=untrusted_input,
-            user=self.request.user,
-            auth=self.request.auth,
-            expand=self.request.query_params.getlist('expand'),
-            pdf_data=self.request.query_params.get('pdf_data', 'false').lower() == 'true',
-            questions_supported=self.request.data.get('questions_supported', True),
-            canceled_supported=self.request.data.get('canceled_supported', False),
-            request=self.request,  # this is not clean, but we need it in the serializers for URL generation
-            legacy_url_support=True,
+            redeem_ctx=RedeemContext(
+                user=self.request.user,
+                auth=self.request.auth,
+                expand=self.request.query_params.getlist('expand'),
+                pdf_data=self.request.query_params.get('pdf_data', 'false').lower() == 'true',
+                request=self.request,  # this is not clean, but we need it in the serializers for URL generation
+            ),
+            redeem_opts=RedeemOptions(
+                force=force,
+                checkin_type=checkin_type,
+                ignore_unpaid=ignore_unpaid,
+                nonce=nonce,
+                untrusted_input=untrusted_input,
+                questions_supported=self.request.data.get('questions_supported', True),
+                canceled_supported=self.request.data.get('canceled_supported', False),
+                legacy_url_support=True,
+            )
         )
 
 
@@ -992,23 +972,27 @@ class CheckinRPCRedeemView(views.APIView):
         return _redeem_process(
             checkinlists=s.validated_data['lists'],
             raw_barcode=s.validated_data['secret'],
-            source_type=s.validated_data['source_type'],
             answers_data=s.validated_data.get('answers'),
             datetime=s.validated_data.get('datetime') or now(),
-            force=s.validated_data['force'],
-            checkin_type=s.validated_data['type'],
-            ignore_unpaid=s.validated_data['ignore_unpaid'],
-            nonce=s.validated_data.get('nonce'),
-            untrusted_input=True,
-            user=self.request.user,
-            auth=self.request.auth,
-            expand=self.request.query_params.getlist('expand'),
-            pdf_data=self.request.query_params.get('pdf_data', 'false').lower() == 'true',
-            questions_supported=s.validated_data['questions_supported'],
-            use_order_locale=s.validated_data['use_order_locale'],
-            canceled_supported=True,
-            request=self.request,  # this is not clean, but we need it in the serializers for URL generation
-            legacy_url_support=False,
+            redeem_ctx=RedeemContext(
+                user=self.request.user,
+                auth=self.request.auth,
+                expand=self.request.query_params.getlist('expand'),
+                pdf_data=self.request.query_params.get('pdf_data', 'false').lower() == 'true',
+                request=self.request,
+            ),
+            redeem_opts=RedeemOptions(
+                source_type=s.validated_data['source_type'],
+                force=s.validated_data['force'],
+                checkin_type=s.validated_data['type'],
+                ignore_unpaid=s.validated_data['ignore_unpaid'],
+                nonce=s.validated_data.get('nonce'),
+                untrusted_input=True,
+                questions_supported=s.validated_data['questions_supported'],
+                canceled_supported=s.validated_data['canceled_supported'],
+                use_order_locale=s.validated_data['use_order_locale'],
+                legacy_url_support=False,
+            )
         )
 
 
