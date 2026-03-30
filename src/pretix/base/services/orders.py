@@ -244,20 +244,7 @@ def reactivate_order(order: Order, force: bool=False, user: User=None, auth=None
                 if position.voucher:
                     Voucher.objects.filter(pk=position.voucher.pk).update(redeemed=Greatest(0, F('redeemed') + 1))
 
-                for gc in position.issued_gift_cards.all():
-                    gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
-                    gc.transactions.create(value=position.price, order=order, acceptor=order.event.organizer)
-                    gc.log_action(
-                        action='pretix.giftcards.transaction.manual',
-                        user=user,
-                        auth=auth,
-                        data={
-                            'value': position.price,
-                            'acceptor_id': order.event.organizer.id,
-                            'acceptor_slug': order.event.organizer.slug
-                        }
-                    )
-                    break
+                _reactivate_credit_issued_gift_cards_for_position(position, order, user, auth)
 
                 for m in position.granted_memberships.all():
                     m.canceled = False
@@ -730,6 +717,27 @@ def _reverse_issued_gift_cards_for_line(line, *, order, line_price, not_redeemed
                 'acceptor_slug': order.event.organizer.slug
             }
         )
+
+
+def _reactivate_credit_issued_gift_cards_for_position(position: OrderPosition, order: Order, user, auth) -> None:
+    """
+    Re-post positive gift card ledger transactions when reactivating a canceled order.
+    At most one issued gift card per position is processed (legacy ``break`` preserved).
+    """
+    for gc in position.issued_gift_cards.all():
+        gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
+        gc.transactions.create(value=position.price, order=order, acceptor=order.event.organizer)
+        gc.log_action(
+            action='pretix.giftcards.transaction.manual',
+            user=user,
+            auth=auth,
+            data={
+                'value': position.price,
+                'acceptor_id': order.event.organizer.id,
+                'acceptor_slug': order.event.organizer.slug
+            }
+        )
+        break
 
 
 def _check_date(event: Event, now_dt: datetime):
