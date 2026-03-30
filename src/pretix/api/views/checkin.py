@@ -496,7 +496,7 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
     prefetch_related_objects([cl for cl in checkinlists if not cl.all_products], 'limit_products')
 
     device = redeem_ctx.auth if isinstance(redeem_ctx.auth, Device) else None
-    gate = redeem_opts.gate or (redeem_ctx.auth.gate if isinstance(redeem_ctx.auth, Device) else None)
+    computed_gate = redeem_opts.gate or (redeem_ctx.auth.gate if isinstance(redeem_ctx.auth, Device) else None)
 
     context = {
         'request': redeem_ctx.request,
@@ -519,7 +519,7 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
         list=checkinlists[0],
         datetime=datetime,
         device=device,
-        gate=redeem_opts.gate,
+        gate=computed_gate,
         nonce=redeem_opts.nonce,
         forced=redeem_opts.force,
     )
@@ -785,7 +785,7 @@ def _redeem_process(*, checkinlists, raw_barcode, answers_data, datetime,
                 raw_source_type=redeem_opts.source_type,
                 from_revoked_secret=from_revoked_secret,
                 simulate=redeem_opts.simulate,
-                gate=redeem_opts.gate,
+                gate=computed_gate,
             )
         except RequiredQuestionsError as e:
             return Response({
