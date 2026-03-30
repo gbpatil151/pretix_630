@@ -49,6 +49,22 @@ Time is recorded in **15-minute increments**. Categories: triage, plan, implemen
 - Notes (fill hours as required for grading):
   - **#28** — `build_invoice` split into helpers in `invoices.py`.
   - **#29** — `_reverse_issued_gift_cards_for_line` + gift card reversal dedup on cancel paths.
+### Issue #29: Extract reactivation gift-card credit helper (`orders.py`)
+- Triage/Understand: 0.25h
+- Plan: 0.25h
+- Implement: 0.25h
+- Verify: 0.25h
+- PR overhead: 0.25h
+- Review time (as reviewer): __
+- Rework after review: __
+- Total: ~1.25h
+- Notes:
+  - `reactivate_order` now calls `_reactivate_credit_issued_gift_cards_for_position` (pairs with existing `_reverse_issued_gift_cards_for_line` on cancel paths).
+  - **Verification:** `pytest src/tests/base/test_orders.py -k reactivat` — 10 passed.
+
+### Issue #28 / #32 / #33 (orders & invoices — see merged PRs / backlog)
+- Notes (fill hours as required for grading):
+  - **#28** — `build_invoice` helpers in `invoices.py` (e.g. PR #50).
   - **#32** — `_calculate_voucher_budget_use` for voucher budget dedup.
   - **#33** — `_check_positions_availability_loop` extracted from `_check_positions`.
 
