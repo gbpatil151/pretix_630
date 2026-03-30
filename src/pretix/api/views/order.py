@@ -887,8 +887,8 @@ class EventOrderViewSet(OrderViewSetMixin, viewsets.ModelViewSet):
             instance = serializer.instance
 
             # Log simple scalar field changes via lookup table
-            for field, (action, data_key) in self._SIMPLE_FIELD_LOG_MAP.items():
-                self._log_simple_field_change(instance, field, action, data_key)
+            for field, (log_action_name, data_key) in self._SIMPLE_FIELD_LOG_MAP.items():
+                self._log_simple_field_change(instance, field, log_action_name, data_key)
 
             # Log contact-info changes (need old + new values)
             self._log_contact_changes(instance)
