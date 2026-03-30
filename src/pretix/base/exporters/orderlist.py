@@ -769,9 +769,9 @@ class OrderListExporter(MultiSheetListExporter):
         else:
             row.extend(['', '', '', '', ''])
 
-    def _build_position_core_cells(self, row, op, order, tz):
+    def _build_position_core_cells(self, row, op):
         """Append product, attendee contact, voucher, and secret cells."""
-        row += [
+        row.extend([
             str(op.item),
             str(op.item_id),
             str(op.variation) if op.variation else '',
@@ -781,7 +781,7 @@ class OrderListExporter(MultiSheetListExporter):
             str(op.tax_rule) if op.tax_rule else '',
             op.tax_value,
             op.attendee_name,
-        ]
+        ])
 
     def _build_position_contact_cells(self, row, op):
         """Append attendee contact and voucher fields to the row."""
@@ -835,9 +835,9 @@ class OrderListExporter(MultiSheetListExporter):
     def _append_subevent_meta_cells(self, row, op, meta_data_labels):
         """Append subevent metadata columns to the row."""
         if op.subevent:
-            row += op.subevent.meta_data.values()
+            row.extend(op.subevent.meta_data.values())
         else:
-            row += [''] * len(meta_data_labels)
+            row.extend([''] * len(meta_data_labels))
 
     def _build_position_row(
         self, op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels
@@ -859,7 +859,7 @@ class OrderListExporter(MultiSheetListExporter):
             self._append_subevent_cells(
                 row, op, self.event_object_cache[order.event_id]
             )
-        self._build_position_core_cells(row, op, order, tz)
+        self._build_position_core_cells(row, op)
         self._append_position_attendee_cells(row, op, name_scheme)
         self._build_position_contact_cells(row, op)
         self._append_seat_cells(row, op)
