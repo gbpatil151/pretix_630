@@ -45,6 +45,10 @@ Time is recorded in **15-minute increments**. Categories: triage, plan, implemen
   - Added `DEFAULT_PRIMARY_FONT`, `HEX_COLOR_REGEX`, shared `_HEX_COLOR_VALIDATOR`; deduped theme color fields.
   - Split `validate_event_settings` into `_validate_event_settings_*` helpers.
 
+### Issue #28 / #29 / #32 / #33 (orders & invoices — earlier PRs on `master`)
+- Notes (fill hours as required for grading):
+  - **#28** — `build_invoice` split into helpers in `invoices.py`.
+  - **#29** — `_reverse_issued_gift_cards_for_line` + gift card reversal dedup on cancel paths.
 ### Issue #29: Extract reactivation gift-card credit helper (`orders.py`)
 - Triage/Understand: 0.25h
 - Plan: 0.25h
