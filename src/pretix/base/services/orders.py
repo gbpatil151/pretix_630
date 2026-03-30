@@ -244,20 +244,7 @@ def reactivate_order(order: Order, force: bool=False, user: User=None, auth=None
                 if position.voucher:
                     Voucher.objects.filter(pk=position.voucher.pk).update(redeemed=Greatest(0, F('redeemed') + 1))
 
-                for gc in position.issued_gift_cards.all():
-                    gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
-                    gc.transactions.create(value=position.price, order=order, acceptor=order.event.organizer)
-                    gc.log_action(
-                        action='pretix.giftcards.transaction.manual',
-                        user=user,
-                        auth=auth,
-                        data={
-                            'value': position.price,
-                            'acceptor_id': order.event.organizer.id,
-                            'acceptor_slug': order.event.organizer.slug
-                        }
-                    )
-                    break
+                _reactivate_credit_issued_gift_cards_for_position(position, order, user, auth)
 
                 for m in position.granted_memberships.all():
                     m.canceled = False
@@ -512,6 +499,193 @@ def deny_order(order, comment='', user=None, send_mail: bool=True, auth=None):
     return order.pk
 
 
+def _cancel_order_prepare_initial_cancellations(order, cancel_invoice):
+    """Build initial cancellation invoice list and return the last non-cancellation invoice (if any)."""
+    invoices = []
+    last_invoice = None
+    if cancel_invoice:
+        last_invoice = order.invoices.filter(is_cancellation=False).last()
+        if last_invoice and not last_invoice.refered.exists():
+            invoices.append(generate_cancellation(last_invoice))
+    return invoices, last_invoice
+
+
+def _cancel_order_reverse_gift_cards_and_memberships(order, user):
+    """Reverse gift cards and cancel memberships granted on order positions."""
+    for position in order.positions.all():
+        _reverse_issued_gift_cards_for_line(
+            position,
+            order=order,
+            line_price=position.price,
+            not_redeemed_message=_(
+                'This order can not be canceled since the gift card {card} purchased in '
+                'this order has already been redeemed.'
+            ),
+            user=user,
+        )
+
+        for m in position.granted_memberships.all():
+            m.canceled = True
+            m.save()
+
+
+def _cancel_order_apply_cancellation_fee(
+    order,
+    cancellation_fee,
+    keep_fees,
+    tax_mode,
+    cancel_invoice,
+    last_invoice,
+    invoices,
+):
+    """Cancel positions/fees and set order state for a paid cancellation fee path."""
+    positions = []
+    for position in order.positions.all():
+        positions.append(position)
+        if position.voucher:
+            Voucher.objects.filter(pk=position.voucher.pk).update(redeemed=Greatest(0, F('redeemed') - 1))
+        position.canceled = True
+        assign_ticket_secret(
+            event=order.event, position=position, force_invalidate_if_revokation_list_used=True, force_invalidate=False, save=False
+        )
+        position.save(update_fields=['canceled', 'secret'])
+    new_fee = cancellation_fee
+    for fee in order.fees.all():
+        if keep_fees and fee in keep_fees:
+            new_fee -= fee.value
+        else:
+            positions.append(fee)
+            fee.canceled = True
+            fee.save(update_fields=['canceled'])
+
+    if new_fee:
+        tax_rule_zero = TaxRule.zero()
+        if tax_mode == "default":
+            fee_values = [(order.event.cached_default_tax_rule or tax_rule_zero, new_fee)]
+        elif tax_mode == "split":
+            fee_values = split_fee_for_taxes(positions, new_fee, order.event)
+        else:
+            fee_values = [(tax_rule_zero, new_fee)]
+
+        try:
+            ia = order.invoice_address
+        except InvoiceAddress.DoesNotExist:
+            ia = None
+
+        for tax_rule, price in fee_values:
+            tax_rule = tax_rule or tax_rule_zero
+            tax = tax_rule.tax(
+                price, invoice_address=ia, base_price_is="gross"
+            )
+            f = OrderFee(
+                fee_type=OrderFee.FEE_TYPE_CANCELLATION,
+                value=price,
+                order=order,
+                tax_rate=tax.rate,
+                tax_code=tax.code,
+                tax_value=tax.tax,
+                tax_rule=tax_rule,
+            )
+            f.save()
+
+    if cancellation_fee > order.total:
+        raise OrderError(_('The cancellation fee cannot be higher than the total amount of this order.'))
+    elif order.payment_refund_sum < cancellation_fee:
+        order.status = Order.STATUS_PENDING
+        order.set_expires()
+    else:
+        order.status = Order.STATUS_PAID
+    order.total = cancellation_fee
+    order.cancellation_date = now()
+    order.save(update_fields=['status', 'cancellation_date', 'total'])
+
+    if cancel_invoice and last_invoice:
+        try:
+            invoices.append(generate_invoice(order))
+        except Exception as e:
+            logger.exception("Could not generate invoice.")
+            order.log_action("pretix.event.order.invoice.failed", data={
+                "exception": str(e)
+            })
+
+
+def _cancel_order_apply_full_cancel(order):
+    """Mark order canceled with no cancellation fee (full cancel path)."""
+    order.status = Order.STATUS_CANCELED
+    order.cancellation_date = now()
+    order.save(update_fields=['status', 'cancellation_date'])
+
+    for position in order.positions.all():
+        assign_ticket_secret(
+            event=order.event, position=position, force_invalidate_if_revokation_list_used=True, force_invalidate=False, save=True
+        )
+        if position.voucher:
+            Voucher.objects.filter(pk=position.voucher.pk).update(redeemed=Greatest(0, F('redeemed') - 1))
+
+
+def _cancel_order_emit_post_cancel_inside_atomic(
+    order,
+    user,
+    send_mail,
+    comment,
+    cancellation_fee,
+    api_token,
+    device,
+    oauth_application,
+    invoices,
+):
+    """Logging, transactions, invoice transmission, and cancellation email (inside order atomic block)."""
+    order.log_action('pretix.event.order.canceled', user=user, auth=api_token or oauth_application or device,
+                     data={'cancellation_fee': cancellation_fee, 'comment': comment})
+    order.cancellation_requests.all().delete()
+
+    order.create_transactions()
+
+    transmit_invoices_task = [i for i in invoices if invoice_transmission_separately(i)]
+    transmit_invoices_mail = [i for i in invoices if i not in transmit_invoices_task and order.event.settings.invoice_email_attachment]
+    for inv in transmit_invoices_task:
+        transmit_invoice.apply_async(args=(order.event_id, inv.pk, False))
+
+    if send_mail:
+        with language(order.locale, order.event.settings.region):
+            email_template = order.event.settings.mail_text_order_canceled
+            email_subject = order.event.settings.mail_subject_order_canceled
+            email_context = get_email_context(event=order.event, order=order, comment=comment or "")
+            order.send_mail(
+                email_subject, email_template, email_context,
+                'pretix.event.order.email.order_canceled', user,
+                invoices=transmit_invoices_mail,
+            )
+
+
+def _cancel_order_try_cancel_open_payments(order, user, api_token, device, oauth_application):
+    """Cancel pending/created payments after the main cancel transaction completes."""
+    for p in order.payments.filter(state__in=(OrderPayment.PAYMENT_STATE_CREATED, OrderPayment.PAYMENT_STATE_PENDING)):
+        try:
+            with transaction.atomic():
+                p.payment_provider.cancel_payment(p)
+                order.log_action(
+                    'pretix.event.order.payment.canceled',
+                    {
+                        'local_id': p.local_id,
+                        'provider': p.provider,
+                    },
+                    user=user,
+                    auth=api_token or oauth_application or device
+                )
+        except PaymentException as e:
+            order.log_action(
+                'pretix.event.order.payment.canceled.failed',
+                {
+                    'local_id': p.local_id,
+                    'provider': p.provider,
+                    'error': str(e)
+                },
+                user=user,
+                auth=api_token or oauth_application or device
+            )
+
+
 def _cancel_order(order, user=None, send_mail: bool=True, api_token=None, device=None, oauth_application=None,
                   cancellation_fee=None, keep_fees=None, cancel_invoice=True, comment=None, tax_mode=None):
     """
@@ -540,155 +714,22 @@ def _cancel_order(order, user=None, send_mail: bool=True, api_token=None, device
 
         if not order.cancel_allowed():
             raise OrderError(_('You cannot cancel this order.'))
-        invoices = []
-        if cancel_invoice:
-            i = order.invoices.filter(is_cancellation=False).last()
-            if i and not i.refered.exists():
-                invoices.append(generate_cancellation(i))
+        invoices, last_invoice = _cancel_order_prepare_initial_cancellations(order, cancel_invoice)
 
-        for position in order.positions.all():
-            _reverse_issued_gift_cards_for_line(
-                position,
-                order=order,
-                line_price=position.price,
-                not_redeemed_message=_(
-                    'This order can not be canceled since the gift card {card} purchased in '
-                    'this order has already been redeemed.'
-                ),
-                user=user,
-            )
-
-            for m in position.granted_memberships.all():
-                m.canceled = True
-                m.save()
+        _cancel_order_reverse_gift_cards_and_memberships(order, user)
 
         if cancellation_fee:
-            positions = []
-            for position in order.positions.all():
-                positions.append(position)
-                if position.voucher:
-                    Voucher.objects.filter(pk=position.voucher.pk).update(redeemed=Greatest(0, F('redeemed') - 1))
-                position.canceled = True
-                assign_ticket_secret(
-                    event=order.event, position=position, force_invalidate_if_revokation_list_used=True, force_invalidate=False, save=False
-                )
-                position.save(update_fields=['canceled', 'secret'])
-            new_fee = cancellation_fee
-            for fee in order.fees.all():
-                if keep_fees and fee in keep_fees:
-                    new_fee -= fee.value
-                else:
-                    positions.append(fee)
-                    fee.canceled = True
-                    fee.save(update_fields=['canceled'])
-
-            if new_fee:
-                tax_rule_zero = TaxRule.zero()
-                if tax_mode == "default":
-                    fee_values = [(order.event.cached_default_tax_rule or tax_rule_zero, new_fee)]
-                elif tax_mode == "split":
-                    fee_values = split_fee_for_taxes(positions, new_fee, order.event)
-                else:
-                    fee_values = [(tax_rule_zero, new_fee)]
-
-                try:
-                    ia = order.invoice_address
-                except InvoiceAddress.DoesNotExist:
-                    ia = None
-
-                for tax_rule, price in fee_values:
-                    tax_rule = tax_rule or tax_rule_zero
-                    tax = tax_rule.tax(
-                        price, invoice_address=ia, base_price_is="gross"
-                    )
-                    f = OrderFee(
-                        fee_type=OrderFee.FEE_TYPE_CANCELLATION,
-                        value=price,
-                        order=order,
-                        tax_rate=tax.rate,
-                        tax_code=tax.code,
-                        tax_value=tax.tax,
-                        tax_rule=tax_rule,
-                    )
-                    f.save()
-
-            if cancellation_fee > order.total:
-                raise OrderError(_('The cancellation fee cannot be higher than the total amount of this order.'))
-            elif order.payment_refund_sum < cancellation_fee:
-                order.status = Order.STATUS_PENDING
-                order.set_expires()
-            else:
-                order.status = Order.STATUS_PAID
-            order.total = cancellation_fee
-            order.cancellation_date = now()
-            order.save(update_fields=['status', 'cancellation_date', 'total'])
-
-            if cancel_invoice and i:
-                try:
-                    invoices.append(generate_invoice(order))
-                except Exception as e:
-                    logger.exception("Could not generate invoice.")
-                    order.log_action("pretix.event.order.invoice.failed", data={
-                        "exception": str(e)
-                    })
-        else:
-            order.status = Order.STATUS_CANCELED
-            order.cancellation_date = now()
-            order.save(update_fields=['status', 'cancellation_date'])
-
-            for position in order.positions.all():
-                assign_ticket_secret(
-                    event=order.event, position=position, force_invalidate_if_revokation_list_used=True, force_invalidate=False, save=True
-                )
-                if position.voucher:
-                    Voucher.objects.filter(pk=position.voucher.pk).update(redeemed=Greatest(0, F('redeemed') - 1))
-
-        order.log_action('pretix.event.order.canceled', user=user, auth=api_token or oauth_application or device,
-                         data={'cancellation_fee': cancellation_fee, 'comment': comment})
-        order.cancellation_requests.all().delete()
-
-        order.create_transactions()
-
-        transmit_invoices_task = [i for i in invoices if invoice_transmission_separately(i)]
-        transmit_invoices_mail = [i for i in invoices if i not in transmit_invoices_task and order.event.settings.invoice_email_attachment]
-        for i in transmit_invoices_task:
-            transmit_invoice.apply_async(args=(order.event_id, i.pk, False))
-
-        if send_mail:
-            with language(order.locale, order.event.settings.region):
-                email_template = order.event.settings.mail_text_order_canceled
-                email_subject = order.event.settings.mail_subject_order_canceled
-                email_context = get_email_context(event=order.event, order=order, comment=comment or "")
-                order.send_mail(
-                    email_subject, email_template, email_context,
-                    'pretix.event.order.email.order_canceled', user,
-                    invoices=transmit_invoices_mail,
-                )
-
-    for p in order.payments.filter(state__in=(OrderPayment.PAYMENT_STATE_CREATED, OrderPayment.PAYMENT_STATE_PENDING)):
-        try:
-            with transaction.atomic():
-                p.payment_provider.cancel_payment(p)
-                order.log_action(
-                    'pretix.event.order.payment.canceled',
-                    {
-                        'local_id': p.local_id,
-                        'provider': p.provider,
-                    },
-                    user=user,
-                    auth=api_token or oauth_application or device
-                )
-        except PaymentException as e:
-            order.log_action(
-                'pretix.event.order.payment.canceled.failed',
-                {
-                    'local_id': p.local_id,
-                    'provider': p.provider,
-                    'error': str(e)
-                },
-                user=user,
-                auth=api_token or oauth_application or device
+            _cancel_order_apply_cancellation_fee(
+                order, cancellation_fee, keep_fees, tax_mode, cancel_invoice, last_invoice, invoices
             )
+        else:
+            _cancel_order_apply_full_cancel(order)
+
+        _cancel_order_emit_post_cancel_inside_atomic(
+            order, user, send_mail, comment, cancellation_fee, api_token, device, oauth_application, invoices
+        )
+
+    _cancel_order_try_cancel_open_payments(order, user, api_token, device, oauth_application)
 
     order_canceled.send(order.event, order=order)
     return order.pk
@@ -730,6 +771,27 @@ def _reverse_issued_gift_cards_for_line(line, *, order, line_price, not_redeemed
                 'acceptor_slug': order.event.organizer.slug
             }
         )
+
+
+def _reactivate_credit_issued_gift_cards_for_position(position: OrderPosition, order: Order, user, auth) -> None:
+    """
+    Re-post positive gift card ledger transactions when reactivating a canceled order.
+    At most one issued gift card per position is processed (legacy ``break`` preserved).
+    """
+    for gc in position.issued_gift_cards.all():
+        gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=gc.pk)
+        gc.transactions.create(value=position.price, order=order, acceptor=order.event.organizer)
+        gc.log_action(
+            action='pretix.giftcards.transaction.manual',
+            user=user,
+            auth=auth,
+            data={
+                'value': position.price,
+                'acceptor_id': order.event.organizer.id,
+                'acceptor_slug': order.event.organizer.slug
+            }
+        )
+        break
 
 
 def _check_date(event: Event, now_dt: datetime):
