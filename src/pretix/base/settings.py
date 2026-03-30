@@ -86,6 +86,14 @@ ROUNDING_MODES = (
     # We could also have sum_by_gross, but we're not aware of any use-cases for it
 )
 
+# Shared defaults (reduces duplication / SonarQube S1192)
+DEFAULT_PRIMARY_FONT = 'Open Sans'
+HEX_COLOR_REGEX = r'^#[0-9a-fA-F]{6}$'
+_HEX_COLOR_VALIDATOR = RegexValidator(
+    regex=HEX_COLOR_REGEX,
+    message=_('Please enter the hexadecimal code of a color, e.g. #990000.'),
+)
+
 
 def country_choice_kwargs():
     allcountries = list(CachedCountries())
@@ -98,7 +106,7 @@ def country_choice_kwargs():
 def primary_font_kwargs():
     from pretix.presale.style import get_fonts
 
-    choices = [('Open Sans', 'Open Sans')]
+    choices = [(DEFAULT_PRIMARY_FONT, DEFAULT_PRIMARY_FONT)]
     choices += sorted([
         (a, {"title": a, "data": v}) for a, v in get_fonts(pdf_support_required=False).items()
     ], key=lambda a: a[0])
@@ -110,7 +118,7 @@ def primary_font_kwargs():
 def invoice_font_kwargs():
     from pretix.presale.style import get_fonts
 
-    choices = [('Open Sans', 'Open Sans')]
+    choices = [(DEFAULT_PRIMARY_FONT, DEFAULT_PRIMARY_FONT)]
     choices += sorted([
         (a, a) for a, v in get_fonts().items()
     ], key=lambda a: a[0])
@@ -3007,15 +3015,13 @@ Your {organizer} team"""))  # noqa: W291
         'serializer_class': serializers.CharField,
         'serializer_kwargs': dict(
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
         ),
         'form_kwargs': dict(
             label=_("Primary color"),
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
             required=True,
             widget=forms.TextInput(attrs={'class': 'colorpickerfield'})
@@ -3028,16 +3034,14 @@ Your {organizer} team"""))  # noqa: W291
         'serializer_class': serializers.CharField,
         'serializer_kwargs': dict(
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
         ),
         'form_kwargs': dict(
             label=_("Accent color for success"),
             help_text=_("We strongly suggest to use a shade of green."),
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
             required=True,
             widget=forms.TextInput(attrs={'class': 'colorpickerfield'})
@@ -3050,16 +3054,14 @@ Your {organizer} team"""))  # noqa: W291
         'serializer_class': serializers.CharField,
         'serializer_kwargs': dict(
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
         ),
         'form_kwargs': dict(
             label=_("Accent color for errors"),
             help_text=_("We strongly suggest to use a shade of red."),
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
             required=True,
             widget=forms.TextInput(attrs={'class': 'colorpickerfield'})
@@ -3072,15 +3074,13 @@ Your {organizer} team"""))  # noqa: W291
         'serializer_class': serializers.CharField,
         'serializer_kwargs': dict(
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
         ),
         'form_kwargs': dict(
             label=_("Page background color"),
             validators=[
-                RegexValidator(regex='^#[0-9a-fA-F]{6}$',
-                               message=_('Please enter the hexadecimal code of a color, e.g. #990000.')),
+                _HEX_COLOR_VALIDATOR,
             ],
             required=True,
             widget=forms.TextInput(attrs={'class': 'colorpickerfield no-contrast'})
@@ -3105,7 +3105,7 @@ Your {organizer} team"""))  # noqa: W291
         )
     },
     'primary_font': {
-        'default': 'Open Sans',
+        'default': DEFAULT_PRIMARY_FONT,
         'type': str,
         'form_class': forms.ChoiceField,
         'serializer_class': serializers.ChoiceField,
@@ -4049,14 +4049,14 @@ class SettingsSandbox:
         self._event.settings.set(self._convert_key(key), value)
 
 
-def validate_event_settings(event, settings_dict):
-    from pretix.base.models import Event
-    from pretix.base.signals import validate_event_settings
-
+def _validate_event_settings_default_locale(settings_dict):
     if 'locales' in settings_dict and settings_dict['locale'] not in settings_dict['locales']:
         raise ValidationError({
             'locale': _('Your default locale must also be enabled for your event (see box above).')
         })
+
+
+def _validate_event_settings_attendee_flags(settings_dict):
     if settings_dict.get('attendee_names_required') and not settings_dict.get('attendee_names_asked'):
         raise ValidationError({
             'attendee_names_required': _('You cannot require specifying attendee names if you do not ask for them.')
@@ -4065,6 +4065,9 @@ def validate_event_settings(event, settings_dict):
         raise ValidationError({
             'attendee_emails_required': _('You have to ask for attendee emails if you want to make them required.')
         })
+
+
+def _validate_event_settings_invoice_flags(settings_dict):
     if settings_dict.get('invoice_address_required') and not settings_dict.get('invoice_address_asked'):
         raise ValidationError({
             'invoice_address_required': _('You have to ask for invoice addresses if you want to make them required.')
@@ -4073,6 +4076,9 @@ def validate_event_settings(event, settings_dict):
         raise ValidationError({
             'invoice_address_company_required': _('You have to require invoice addresses to require for company names.')
         })
+
+
+def _validate_event_settings_invoice_from_state(settings_dict):
     if settings_dict.get('invoice_address_from_state') and settings_dict.get('invoice_address_from_country'):
         cc = str(settings_dict.get('invoice_address_from_country'))
         if cc not in COUNTRIES_WITH_STATE_IN_ADDRESS:
@@ -4088,6 +4094,8 @@ def validate_event_settings(event, settings_dict):
                 ]}
             )
 
+
+def _validate_event_settings_payment_term_last(event, settings_dict):
     payment_term_last = settings_dict.get('payment_term_last')
     if payment_term_last and event.presale_end:
         if payment_term_last.date(event) < event.presale_end.date():
@@ -4095,6 +4103,8 @@ def validate_event_settings(event, settings_dict):
                 'payment_term_last': _('The last payment date cannot be before the end of presale.')
             })
 
+
+def _validate_event_settings_seating_channels(event, settings_dict):
     if settings_dict.get('seating_allow_blocked_seats_for_channel'):
         allowed_channels = set(event.organizer.sales_channels.values_list("identifier", flat=True))
         for channel in settings_dict['seating_allow_blocked_seats_for_channel']:
@@ -4104,6 +4114,18 @@ def validate_event_settings(event, settings_dict):
                         identifier=channel
                     )
                 })
+
+
+def validate_event_settings(event, settings_dict):
+    from pretix.base.models import Event
+    from pretix.base.signals import validate_event_settings
+
+    _validate_event_settings_default_locale(settings_dict)
+    _validate_event_settings_attendee_flags(settings_dict)
+    _validate_event_settings_invoice_flags(settings_dict)
+    _validate_event_settings_invoice_from_state(settings_dict)
+    _validate_event_settings_payment_term_last(event, settings_dict)
+    _validate_event_settings_seating_channels(event, settings_dict)
 
     if isinstance(event, Event):
         validate_event_settings.send(sender=event, settings_dict=settings_dict)
