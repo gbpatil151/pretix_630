@@ -534,32 +534,15 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
         ]
         return headers
 
-    def _build_checkinlist_row(self, op, cl, form_data, questions, name_scheme):
-        try:
-            ia = op.order.invoice_address
-        except InvoiceAddress.DoesNotExist:
-            ia = InvoiceAddress()
+    def _get_parsed_date(self, parsed_date):
+        if isinstance(parsed_date, str):
+            parsed_date = dateutil.parser.parse(parsed_date)
+        if parsed_date and not is_aware(parsed_date):
+            parsed_date = make_aware(parsed_date, timezone.utc)
+        return parsed_date
 
-        last_checked_in = None
-        if isinstance(op.last_checked_in, str):  # SQLite
-            last_checked_in = dateutil.parser.parse(op.last_checked_in)
-        elif op.last_checked_in:
-            last_checked_in = op.last_checked_in
-        if last_checked_in and not is_aware(last_checked_in):
-            last_checked_in = make_aware(last_checked_in, timezone.utc)
-
-        last_checked_out = None
-        if isinstance(op.last_checked_out, str):  # SQLite
-            last_checked_out = dateutil.parser.parse(op.last_checked_out)
-        elif op.last_checked_out:
-            last_checked_out = op.last_checked_out
-        if last_checked_out and not is_aware(last_checked_out):
-            last_checked_out = make_aware(last_checked_out, timezone.utc)
-
-        row = [
-            op.order.code,
-            op.attendee_name or (op.addon_to.attendee_name if op.addon_to else '') or ia.name,
-        ]
+    def _get_name_parts(self, name_scheme, op, ia):
+        parts = []
         if len(name_scheme['fields']) > 1:
             for k, label, w in name_scheme['fields']:
                 v = (
@@ -569,15 +552,76 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
                 ).get(k, '')
                 if k == "salutation":
                     v = pgettext("person_name_salutation", v)
+                parts.append(v)
+        return parts
 
-                row.append(v)
+    def _get_subevent_data(self, op):
+        if not self.event.has_subevents:
+            return []
+
+        data = [
+            str(op.subevent.name),
+            date_format(op.subevent.date_from.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
+        ]
+        if op.subevent.date_to:
+            data.append(date_format(op.subevent.date_to.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT'))
+        else:
+            data.append('')
+        return data
+
+    def _get_answer_cache(self, op, questions):
+        acache = {}
+        if op.addon_to:
+            for a in op.addon_to.answers.all():
+                acache[a.question_id] = format_answer_for_export(a)
+        for a in op.answers.all():
+            acache[a.question_id] = format_answer_for_export(a)
+
+        return [acache.get(q.pk, '') for q in questions]
+
+    def _get_seat_data(self, op):
+        if op.seat:
+            return [
+                op.seat.seat_guid,
+                str(op.seat),
+                op.seat.zone_name,
+                op.seat.row_name,
+                op.seat.seat_number,
+            ]
+        return ['', '', '', '', '']
+
+    def _get_address_data(self, op, ia):
+        if op.street or op.zipcode or op.city:
+            address = op
+        else:
+            address = ia
+        return [
+            address.street or '',
+            address.zipcode or '',
+            address.city or '',
+            address.country if address.country else '',
+            address.state or '',
+        ]
+
+    def _build_checkinlist_row(self, op, cl, form_data, questions, name_scheme):
+        try:
+            ia = op.order.invoice_address
+        except InvoiceAddress.DoesNotExist:
+            ia = InvoiceAddress()
+
+        last_checked_in = self._get_parsed_date(op.last_checked_in)
+        last_checked_out = self._get_parsed_date(op.last_checked_out)
+
+        row = [
+            op.order.code,
+            op.attendee_name or (op.addon_to.attendee_name if op.addon_to else '') or ia.name,
+        ]
+        row += self._get_name_parts(name_scheme, op, ia)
         row += [
             str(op.item) + (" – " + str(op.variation.value) if op.variation else ""),
             op.price,
-            date_format(last_checked_in.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
-            if last_checked_in else '',
-            date_format(last_checked_out.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
-            if last_checked_out else '',
+            date_format(last_checked_in.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT') if last_checked_in else '',
+            date_format(last_checked_out.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT') if last_checked_out else '',
             _('Yes') if op.auto_checked_in else _('No'),
         ]
         if cl.include_pending:
@@ -586,23 +630,9 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
             row.append(op.secret)
         row.append(op.attendee_email or (op.addon_to.attendee_email if op.addon_to else '') or op.order.email or '')
         row.append(str(op.order.phone) if op.order.phone else '')
-        if self.event.has_subevents:
-            row.append(str(op.subevent.name))
-            row.append(date_format(op.subevent.date_from.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT'))
-            if op.subevent.date_to:
-                row.append(
-                    date_format(op.subevent.date_to.astimezone(self.event.timezone), 'SHORT_DATETIME_FORMAT')
-                )
-            else:
-                row.append('')
-        acache = {}
-        if op.addon_to:
-            for a in op.addon_to.answers.all():
-                acache[a.question_id] = format_answer_for_export(a)
-        for a in op.answers.all():
-            acache[a.question_id] = format_answer_for_export(a)
-        for q in questions:
-            row.append(acache.get(q.pk, ''))
+
+        row += self._get_subevent_data(op)
+        row += self._get_answer_cache(op, questions)
 
         row.append(op.company or ia.company)
         row.append(op.voucher.code if op.voucher else "")
@@ -612,33 +642,15 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
         row.append(op.order.comment or "")
         row.append("\n".join(text for text in [op.order.checkin_text, op.item.checkin_text] if text))
 
-        if op.seat:
-            row += [
-                op.seat.seat_guid,
-                str(op.seat),
-                op.seat.zone_name,
-                op.seat.row_name,
-                op.seat.seat_number,
-            ]
-        else:
-            row += ['', '', '', '', '']
+        row += self._get_seat_data(op)
 
         row += [
             _('Yes') if op.blocked else '',
             date_format(op.valid_from, 'SHORT_DATETIME_FORMAT') if op.valid_from else '',
             date_format(op.valid_until, 'SHORT_DATETIME_FORMAT') if op.valid_until else '',
         ]
-        if (op.street or op.zipcode or op.city):
-            address = op
-        else:
-            address = ia
-        row += [
-            address.street or '',
-            address.zipcode or '',
-            address.city or '',
-            address.country if address.country else '',
-            address.state or '',
-        ]
+
+        row += self._get_address_data(op, ia)
 
         return row
 
