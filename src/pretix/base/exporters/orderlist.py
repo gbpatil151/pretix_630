@@ -81,6 +81,12 @@ from ..timeframes import (
     resolve_timeframe_to_datetime_start_inclusive_end_exclusive,
 )
 
+# ── Shared translated label constants (SonarCloud rule python:S1192) ──
+_LABEL_TAX_RATE = _('Tax rate')
+_LABEL_TAX_RULE = _('Tax rule')
+_LABEL_TAX_VALUE = _('Tax value')
+_LABEL_INVOICE_ADDRESS_NAME = _('Invoice address name')
+
 
 class OrderListExporter(MultiSheetListExporter):
     identifier = 'orderlist'
@@ -496,12 +502,12 @@ class OrderListExporter(MultiSheetListExporter):
         headers = [
             _('Event slug'), _('Event name'), _('Order code'), _('Status'),
             _('Email'), _('Phone number'), _('Order date'), _('Order time'),
-            _('Fee type'), _('Description'), _('Price'), _('Tax rate'),
-            _('Tax rule'), _('Tax value'), _('Company'), _('Invoice address name'),
+            _('Fee type'), _('Description'), _('Price'), _LABEL_TAX_RATE,
+            _LABEL_TAX_RULE, _LABEL_TAX_VALUE, _('Company'), _LABEL_INVOICE_ADDRESS_NAME,
         ]
         if name_scheme and len(name_scheme['fields']) > 1:
             for k, label, w in name_scheme['fields']:
-                headers.append(_('Invoice address name') + ': ' + str(label))
+                headers.append(_LABEL_INVOICE_ADDRESS_NAME + ': ' + str(label))
         headers += [
             _('Address'), _('ZIP code'), _('City'), _('Country'),
             pgettext('address', 'State'), _('VAT ID'),
@@ -591,9 +597,9 @@ class OrderListExporter(MultiSheetListExporter):
             _('Variation'),
             _('Variation ID'),
             _('Price'),
-            _('Tax rate'),
-            _('Tax rule'),
-            _('Tax value'),
+            _LABEL_TAX_RATE,
+            _LABEL_TAX_RULE,
+            _LABEL_TAX_VALUE,
             _('Attendee name'),
         ]
         if name_scheme and len(name_scheme['fields']) > 1:
@@ -629,11 +635,11 @@ class OrderListExporter(MultiSheetListExporter):
         self._build_question_headers(headers, questions, options, form_data)
         headers += [
             _('Invoice address company'),
-            _('Invoice address name'),
+            _LABEL_INVOICE_ADDRESS_NAME,
         ]
         if name_scheme and len(name_scheme['fields']) > 1:
             for k, label, w in name_scheme['fields']:
-                headers.append(_('Invoice address name') + ': ' + str(label))
+                headers.append(_LABEL_INVOICE_ADDRESS_NAME + ': ' + str(label))
         headers += [
             _('Invoice address street'), _('Invoice address ZIP code'), _('Invoice address city'),
             _('Invoice address country'),
@@ -655,22 +661,31 @@ class OrderListExporter(MultiSheetListExporter):
 
         return headers, options
 
+    def _populate_multi_choice_question(self, headers, q, options, form_data):
+        """Handle header + options for a CHOICE_MULTIPLE question."""
+        if form_data['group_multiple_choice']:
+            for o in q.options.all():
+                options[q.pk].append(o)
+            headers.append(str(q.question))
+        else:
+            for o in q.options.all():
+                headers.append(str(q.question) + ' \u2013 ' + str(o.answer))
+                options[q.pk].append(o)
+
+    def _populate_single_choice_question(self, headers, q, options):
+        """Handle header + options for a CHOICE (single) question."""
+        for o in q.options.all():
+            options[q.pk].append(o)
+        headers.append(str(q.question))
+
     def _build_question_headers(self, headers, questions, options, form_data):
         """Populate options dict and extend headers with per-question column labels."""
         for q in questions:
             if q.type == Question.TYPE_CHOICE_MULTIPLE:
-                if form_data['group_multiple_choice']:
-                    for o in q.options.all():
-                        options[q.pk].append(o)
-                    headers.append(str(q.question))
-                else:
-                    for o in q.options.all():
-                        headers.append(str(q.question) + ' – ' + str(o.answer))
-                        options[q.pk].append(o)
+                self._populate_multi_choice_question(headers, q, options, form_data)
+            elif q.type == Question.TYPE_CHOICE:
+                self._populate_single_choice_question(headers, q, options)
             else:
-                if q.type == Question.TYPE_CHOICE:
-                    for o in q.options.all():
-                        options[q.pk].append(o)
                 headers.append(str(q.question))
 
     def _append_subevent_cells(self, row, op, event_cache_entry):
@@ -754,6 +769,76 @@ class OrderListExporter(MultiSheetListExporter):
         else:
             row.extend(['', '', '', '', ''])
 
+    def _build_position_core_cells(self, row, op, order, tz):
+        """Append product, attendee contact, voucher, and secret cells."""
+        row += [
+            str(op.item),
+            str(op.item_id),
+            str(op.variation) if op.variation else '',
+            str(op.variation_id) if op.variation_id else '',
+            op.price,
+            op.tax_rate,
+            str(op.tax_rule) if op.tax_rule else '',
+            op.tax_value,
+            op.attendee_name,
+        ]
+
+    def _build_position_contact_cells(self, row, op):
+        """Append attendee contact and voucher fields to the row."""
+        row.extend([
+            op.attendee_email,
+            op.company or '',
+            op.street or '',
+            op.zipcode or '',
+            op.city or '',
+            op.country if op.country else '',
+            op.state_for_address or '',
+            op.voucher.code if op.voucher else '',
+            op.voucher_budget_use if op.voucher_budget_use else '',
+            op.voucher.tag if op.voucher else '',
+            op.pseudonymization_id,
+            op.secret,
+        ])
+
+    def _build_position_trailing_cells(self, row, op, order, tz):
+        """Append blocked/valid/comment/addon cells to the row."""
+        row += [
+            _('Yes') if op.blocked else '',
+            date_format(op.valid_from.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_from else '',
+            date_format(op.valid_until.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_until else '',
+        ]
+        row.append(order.comment)
+        row.append(order.custom_followup_at.strftime("%Y-%m-%d") if order.custom_followup_at else "")
+        row.append(op.addon_to.positionid if op.addon_to_id else "")
+
+    def _build_position_footer_cells(self, row, op, order):
+        """Append sales channel, locale, check-in, payment, and link cells."""
+        row += [
+            order.sales_channel,
+            order.locale,
+            _('Yes') if order.email_known_to_work else _('No'),
+            str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '',
+        ]
+        row.append(op.checked_in_lists or "")
+        row.append(', '.join([
+            str(self.providers.get(p, p)) for p in sorted(set((op.payment_providers or '').split(',')))
+            if p and p != 'free'
+        ]))
+        row.append(
+            build_absolute_uri(order.event, 'presale:event.order.position', kwargs={
+                'order': order.code,
+                'secret': op.web_secret,
+                'position': op.positionid
+            })
+        )
+
+    def _append_subevent_meta_cells(self, row, op, meta_data_labels):
+        """Append subevent metadata columns to the row."""
+        if op.subevent:
+            row += op.subevent.meta_data.values()
+        else:
+            row += [''] * len(meta_data_labels)
+
     def _build_position_row(
         self, op, form_data, has_subevents, name_scheme, questions, options, meta_data_labels
     ):
@@ -774,71 +859,20 @@ class OrderListExporter(MultiSheetListExporter):
             self._append_subevent_cells(
                 row, op, self.event_object_cache[order.event_id]
             )
-        row += [
-            str(op.item),
-            str(op.item_id),
-            str(op.variation) if op.variation else '',
-            str(op.variation_id) if op.variation_id else '',
-            op.price,
-            op.tax_rate,
-            str(op.tax_rule) if op.tax_rule else '',
-            op.tax_value,
-            op.attendee_name,
-        ]
+        self._build_position_core_cells(row, op, order, tz)
         self._append_position_attendee_cells(row, op, name_scheme)
-        row.extend([
-            op.attendee_email,
-            op.company or '',
-            op.street or '',
-            op.zipcode or '',
-            op.city or '',
-            op.country if op.country else '',
-            op.state_for_address or '',
-            op.voucher.code if op.voucher else '',
-            op.voucher_budget_use if op.voucher_budget_use else '',
-            op.voucher.tag if op.voucher else '',
-            op.pseudonymization_id,
-            op.secret,
-        ])
+        self._build_position_contact_cells(row, op)
         self._append_seat_cells(row, op)
+        self._build_position_trailing_cells(row, op, order, tz)
 
-        row += [
-            _('Yes') if op.blocked else '',
-            date_format(op.valid_from.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_from else '',
-            date_format(op.valid_until.astimezone(tz), 'SHORT_DATETIME_FORMAT') if op.valid_until else '',
-        ]
-        row.append(order.comment)
-        row.append(order.custom_followup_at.strftime("%Y-%m-%d") if order.custom_followup_at else "")
-        row.append(op.addon_to.positionid if op.addon_to_id else "")
         acache = self._build_answer_cache(op)
         self._append_question_cells(row, questions, options, acache, form_data)
 
         row += self._get_invoice_address_row(order, name_scheme, include_custom_field=False)
-        row += [
-            order.sales_channel,
-            order.locale,
-            _('Yes') if order.email_known_to_work else _('No'),
-            str(order.customer.external_identifier) if order.customer and order.customer.external_identifier else '',
-        ]
-        row.append(op.checked_in_lists or "")
-        row.append(', '.join([
-            str(self.providers.get(p, p)) for p in sorted(set((op.payment_providers or '').split(',')))
-            if p and p != 'free'
-        ]))
-
-        row.append(
-            build_absolute_uri(order.event, 'presale:event.order.position', kwargs={
-                'order': order.code,
-                'secret': op.web_secret,
-                'position': op.positionid
-            })
-        )
+        self._build_position_footer_cells(row, op, order)
 
         if has_subevents:
-            if op.subevent:
-                row += op.subevent.meta_data.values()
-            else:
-                row += [''] * len(meta_data_labels)
+            self._append_subevent_meta_cells(row, op, meta_data_labels)
         return row
 
     def iterate_positions(self, form_data: dict):
@@ -980,10 +1014,10 @@ class TransactionListExporter(ListExporter):
             pgettext('subevent', 'Date'),
 
             _('Price'),
-            _('Tax rate'),
+            _LABEL_TAX_RATE,
             _('Tax rule ID'),
-            _('Tax rule'),
-            _('Tax value'),
+            _LABEL_TAX_RULE,
+            _LABEL_TAX_VALUE,
             _('Gross total'),
             _('Tax total'),
         ]
