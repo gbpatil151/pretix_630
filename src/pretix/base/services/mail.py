@@ -122,9 +122,9 @@ class MailAttachmentOptions:
     """
     attach_tickets: bool = False
     attach_ical: bool = False
-    attach_cached_files: Sequence = None
-    attach_other_files: list = None
-    invoices: Sequence = None
+    attach_cached_files: Optional[Sequence] = None
+    attach_other_files: Optional[list] = None
+    invoices: Optional[Sequence] = None
 
 
 @dataclasses.dataclass
