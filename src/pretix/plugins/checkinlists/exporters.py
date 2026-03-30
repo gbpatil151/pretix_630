@@ -402,7 +402,7 @@ class PDFCheckinList(ReportlabExportMixin, CheckInListMixin, BaseExporter):
             try:
                 ian = op.order.invoice_address.name
                 iac = op.order.invoice_address.company
-            except:
+            except InvoiceAddress.DoesNotExist:
                 ian = ""
                 iac = ""
 
@@ -650,7 +650,7 @@ class CSVCheckinList(CheckInListMixin, ListExporter):
         base_qs = self._get_queryset(cl, form_data, prefetch=False)
 
         name_scheme = PERSON_NAME_SCHEMES[self.event.settings.name_scheme]
-        
+
         yield self._build_checkinlist_headers(cl, form_data, questions, name_scheme)
 
         qs = base_qs.prefetch_related(
