@@ -366,6 +366,18 @@ def _add_invoice_fee_lines(
     return tax_texts, reverse_charge
 
 
+def _apply_invoice_tax_footer_texts(invoice: Invoice, tax_texts: list, reverse_charge: bool) -> None:
+    """
+    Append aggregated tax-rule texts to ``additional_text``, set ``reverse_charge``, and persist.
+    Keeps ``build_invoice`` focused on orchestration after line-building helpers.
+    """
+    if tax_texts:
+        invoice.additional_text += "<br /><br />"
+        invoice.additional_text += "<br />".join(tax_texts)
+    invoice.reverse_charge = reverse_charge
+    invoice.save()
+
+
 @transaction.atomic
 def build_invoice(invoice: Invoice) -> Invoice:
     invoice.locale = invoice.event.settings.get('invoice_language', invoice.event.settings.locale)
@@ -417,11 +429,7 @@ def build_invoice(invoice: Invoice) -> Invoice:
             invoice, fees, positions, ia, now_dt, min_period_start, max_period_end, tax_texts, reverse_charge
         )
 
-        if tax_texts:
-            invoice.additional_text += "<br /><br />"
-            invoice.additional_text += "<br />".join(tax_texts)
-        invoice.reverse_charge = reverse_charge
-        invoice.save()
+        _apply_invoice_tax_footer_texts(invoice, tax_texts, reverse_charge)
 
         build_invoice_data.send(sender=invoice.event, invoice=invoice)
         return invoice
