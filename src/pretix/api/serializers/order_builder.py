@@ -19,8 +19,6 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <https://www.gnu.org/licenses/>.
 #
-# Extracted from OrderCreateSerializer.create() as part of Builder pattern refactoring.
-# See issue #61: Spaghetti Code in OrderSerializer.create -> refactor toward Builder
 
 """
 OrderBuilder — Builder pattern for API order creation
