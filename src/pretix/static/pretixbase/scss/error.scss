@@ -1,0 +1,51 @@
+@import "_theme_variables.scss";
+@import "_bootstrap_vars.scss";
+@import "../../bootstrap/scss/_bootstrap.scss";
+@import "_theme.scss";
+@import "../../fontawesome/scss/font-awesome.scss";
+
+
+body {
+    background: #fbf7fc;
+    padding: 50px 0;
+}
+
+*:focus, .btn:focus {
+    outline: 2px solid $link-hover-color;
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
+.big-icon {
+    font-size: 200px;
+    color: $navbar-inverse-bg;
+    display: block;
+    float: left;
+}
+
+.error-details {
+    margin-left: 260px;
+}
+
+.container {
+    width: 90%;
+    max-width: 800px;
+}
+
+.logo {
+    height: 35px;
+    width: auto;
+}
+
+@media(max-width: 600px) {
+    body {
+        text-align: center;
+    }
+    .big-icon {
+        margin: auto;
+        float: none;
+    }
+    .error-details {
+        margin-left: 0;
+    }
+}

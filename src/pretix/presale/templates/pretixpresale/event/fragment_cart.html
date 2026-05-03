@@ -1,0 +1,547 @@
+{% load i18n %}
+{% load icon %}
+{% load eventurl %}
+{% load daterange %}
+{% load safelink %}
+{% load rich_text %}
+{% load money %}
+{% blocktrans asvar s_taxes %}taxes{% endblocktrans %}
+<div role="table" aria-label="{% trans "Your cart" %}" aria-describedby="{% if cart.is_ordered %}cart-description{% else%}cart-deadline{% endif %}" aria-rowcount="{{ cart.positions|length|add:2 }}">
+    <div class="sr-only" role="rowgroup">
+        <div class="sr-only" role="row">
+            <span role="columnheader" aria-sort="none">{% trans "Product" %}</span>
+            {% if download %}
+                <span role="columnheader" aria-sort="none">{% trans "Ticket download" %}</span>
+            {% else %}
+                <span role="columnheader" aria-sort="none">{% trans "Quantity" %}</span>
+                {% if not hide_prices %}
+                    <span role="columnheader" aria-sort="none">{% trans "Price per item" %}</span>
+                {% endif %}
+            {% endif %}
+            {% if not hide_prices %}
+               <span role="columnheader" aria-sort="none">{% trans "Price total" %}</span>
+            {% endif %}
+        </div>
+    </div>
+    <div role="rowgroup" class="firstchild-in-panel">
+    {% for line in cart.positions %}
+        <div role="row" class="row cart-row {% if hide_prices %}hide-prices{% endif %} {% if download %}has-downloads{% endif %}{% if editable %}editable{% endif %}" data-article-id="item-{{ line.item.id }}{% if line.variation %}-{{ line.variation.id }}{% endif %}">
+            <div role="cell" class="product">
+                <p>
+                {% if line.addon_to %}
+                    <span class="addon-signifier">+</span>
+                {% endif %}
+                <strong>{{ line.item.name }}</strong>
+                {% if line.variation %}
+                    – {{ line.variation }}
+                {% endif %}
+                </p>
+                {% if line.seat or line.voucher or line.subevent or line.used_membership or line.blocked or line.valid_from or line.valid_until %}
+                    <dl class="dl-inline">
+                {% elif event.settings.show_checkin_number_user and line.checkin_count %}
+                    <dl class="dl-inline">
+                {% endif %}
+                {% if line.seat %}
+                    <div class="cart-icon-details">
+                        <dt class="sr-only">{% trans "Seat:" %}</dt>
+                        <dd>
+                            {% include "icons/seat.svg" with cls="svg-icon" %}
+                            {{ line.seat }}
+                        </dd>
+                    </div>
+                {% endif %}
+                {% if line.voucher %}
+                    <div class="cart-icon-details">
+                        <dt><span class="fa fa-tags fa-fw" aria-hidden="true"></span> {% trans "Voucher code used:" %}</dt>
+                        <dd>{{ line.voucher.code }}</dd>
+                    </div>
+                {% endif %}
+                {% if line.subevent %}
+                    <div class="cart-icon-details">
+                        <dt class="sr-only">{% trans "Date:" context "subevent" %}</dt>
+                        <dd>
+                        <span class="fa fa-calendar fa-fw" aria-hidden="true"></span> {{ line.subevent.name }}
+                        <br>
+                        <span class="text-muted" aria-hidden="true">
+                            {{ line.subevent.get_date_range_display_with_times_as_html }}
+                        </span>
+                        <span class="sr-only">
+                            <time datetime="{% if event.settings.show_times %}{{ line.subevent.date_from.isoformat }}{% else %}{{ line.subevent.date_from|date:"Y-m-d" }}{% endif %}">{{ line.subevent.get_date_from_display }}</time>
+                            {% if event.settings.show_date_to and line.subevent.date_to %}
+                                – <time datetime="{% if event.settings.show_times %}{{ line.subevent.date_to.isoformat }}{% else %}{{ line.subevent.date_to|date:"Y-m-d" }}{% endif %}">{{ line.subevent.get_date_to_display }}</time>
+                            {% endif %}
+                        </span>
+                        </dd>
+                    </div>
+                    {% if line.subevent.location %}
+                    {% if not line.addon_to or line.addon_to.subevent_id != line.subevent_id %}
+                    <div class="cart-icon-details">
+                        <dt class="sr-only">{% trans "Location:" %}</dt>
+                        <dd>
+                            <div class="collapse-lines" data-expand-text="{% trans "Show full location" %}" aria-hidden="true">
+                                <span class="content text-muted" id="full-location-{{ line.pk }}">{{ line.subevent.location|linebreaksbr }}</span>
+                            </div>
+                            <div class="sr-only">{{ line.subevent.location|linebreaksbr }}</div>
+                        </dd>
+                    </div>
+                    {% endif %}
+                    {% endif %}
+                {% endif %}
+                {% if line.used_membership %}
+                    <div class="cart-icon-details">
+                        <dt class="sr-only">{% trans "Membership:" %}</dt>
+                        <dd>
+                        <span class="fa fa-id-card fa-fw" aria-hidden="true"></span> {{ line.used_membership }}
+                        </dd>
+                    </div>
+                {% endif %}
+                {% if line.valid_from or line.valid_until %}
+                    <div class="cart-icon-details">
+                        <dd>
+                            <span class="fa fa-clock-o fa-fw" aria-hidden="true"></span>
+                            {% if line.valid_from and line.valid_until %}
+                                {% blocktrans trimmed with datetime_range=line.valid_from|datetimerange:line.valid_until %}
+                                    Valid {{ datetime_range }}
+                                {% endblocktrans %}
+                            {% elif line.valid_from %}
+                                {% blocktrans trimmed with datetime=line.valid_from|date:"SHORT_DATETIME_FORMAT" %}
+                                    Valid from {{ datetime }}
+                                {% endblocktrans %}
+                            {% elif line.valid_until %}
+                                {% blocktrans trimmed with datetime=line.valid_until|date:"SHORT_DATETIME_FORMAT" %}
+                                    Valid until {{ datetime }}
+                                {% endblocktrans %}
+                            {% endif %}
+                        </dd>
+                    </div>
+                {% endif %}
+                {% if line.blocked %}
+                    <div class="cart-icon-details">
+                        <dd class="text-danger">
+                            <span class="fa fa-ban fa-fw text-danger" aria-hidden="true"></span>
+                            <strong>
+                                {% trans "This ticket is blocked." %}
+                            </strong>
+                        </dd>
+                    </div>
+                {% endif %}
+                {% if event.settings.show_checkin_number_user and line.checkin_count %}
+                    <div class="cart-icon-details">
+                        <dt class="sr-only">{% trans "Usage:" context "ticket_checkins" %}</dt>
+                        <dd class="text-success">
+                            <span class="fa fa-check-circle fa-fw text-success" aria-hidden="true"></span>
+                            <strong>
+                            {% blocktrans trimmed count count=line.checkin_count %}
+                                This ticket has been used once.
+                            {% plural %}
+                                This ticket has been used {{ count }} times.
+                            {% endblocktrans %}
+                            </strong>
+                        </dd>
+                    </div>
+                {% endif %}
+                {% if line.seat or line.voucher or line.subevent or line.used_membership or line.blocked or line.valid_from or line.valid_until %}
+                    </dl>
+                {% elif event.settings.show_checkin_number_user and line.checkin_count %}
+                    </dl>
+                {% endif %}
+
+                {% if line.issued_gift_cards.exists %}
+                    <dl class="dl-indented">
+                        {% for gc in line.issued_gift_cards.all %}
+                            <dt>{% trans "Gift card code" %}</dt>
+                            <dd>{{ gc.secret }}</dd>
+                        {% endfor %}
+                    </dl>
+                {% endif %}
+                {% if line.has_questions %}
+                    <dl class="dl-indented">
+                        {% if line.item.ask_attendee_data %}
+                            {% if event.settings.attendee_names_asked %}
+                                <dt class="sr-only">
+                                    {% trans "Attendee name" %}
+                                </dt>
+                                <dd class="toplevel{% if event.settings.attendee_addresses_asked and not event.settings.attendee_emails_asked %} blank-after{% endif %}">
+                                    <span data-toggle="tooltip" title="{% trans "Attendee name" %}">
+                                        {% if line.attendee_name %}{{ line.attendee_name }}{% else %}<em class="text-muted">{% trans "No attendee name provided" %}</em>{% endif %}
+                                    </span>
+                                </dd>
+                            {% endif %}
+                            {% if event.settings.attendee_emails_asked and line.attendee_email %}
+                                <dt class="sr-only">
+                                    {% trans "Attendee email" %}
+                                </dt>
+                                <dd class="toplevel{% if event.settings.attendee_addresses_asked %} blank-after{% endif %}">
+                                    <span data-toggle="tooltip" title="{% trans "Attendee email" %}">
+                                        {{ line.attendee_email }}
+                                    </span>
+                                </dd>
+                            {% endif %}
+                            {% if event.settings.attendee_company_asked and line.company %}
+                                <dt class="sr-only">
+                                    {% trans "Attendee company" %}
+                                </dt>
+                                <dd class="toplevel">
+                                    <span data-toggle="tooltip" title="{% trans "Attendee company" %}">
+                                        {{ line.company }}
+                                    </span>
+                                </dd>
+                            {% endif %}
+                            {% if event.settings.attendee_addresses_asked %}
+                                {% if line.street or line.zipcode or line.city %}
+                                    <dt class="sr-only">
+                                        {% trans "Attendee address" %}
+                                    </dt>
+                                    <dd class="toplevel">
+                                        <span data-toggle="tooltip" title="{% trans "Attendee address" %}">
+                                            {{ line.street|default_if_none:""|linebreaksbr }}<br>
+                                            {{ line.zipcode|default_if_none:"" }} {{ line.city|default_if_none:"" }}<br>
+                                            {% if line.state %}{{ line.state_for_address }}<br>{% endif %}
+                                            {{ line.country.name|default_if_none:"" }}
+                                        </span>
+                                    </dd>
+                                {% endif %}
+                            {% endif %}
+                        {% endif %}
+                        {% for q in line.questions %}
+                            <dt>{{ q.question }}</dt>
+                            <dd>
+                                {% if q.answer %}
+                                    {% if q.answer.file %}
+                                        <span class="fa fa-file" aria-hidden="true"></span>
+                                        <a href="{{ q.answer.frontend_file_url }}?token={% answer_token request q.answer %}">
+                                            {{ q.answer.file_name }}
+                                        </a>
+                                        {% if q.answer.is_image %}
+                                            <br>
+                                            <a href="{{ q.answer.frontend_file_url }}?token={% answer_token request q.answer %}" data-lightbox="order"
+                                                    class="answer-thumb">
+                                                <img src="{{ q.answer.frontend_file_url }}?token={% answer_token request q.answer %}" alt="{% trans "The image you previously uploaded" %}">
+                                            </a>
+                                        {% endif %}
+                                    {% elif q.type == "M" %}
+                                        {{ q.answer|rich_text_snippet }}
+                                    {% else %}
+                                        {{ q.answer|linebreaksbr }}
+                                    {% endif %}
+                                {% else %}
+                                    <em class="text-muted">{% trans "not answered" %}</em>
+                                {% endif %}
+                            </dd>
+                        {% endfor %}
+                        {% for q in line.additional_answers %}
+                            <dt>{{ q.question }}</dt>
+                            <dd>{% if q.answer %}{{ q.answer|linebreaksbr }}{% else %}<em>{% trans "not answered" %}</em>{% endif %}</dd>
+                        {% endfor %}
+                    </dl>
+                {% endif %}
+            </div>
+
+            {% if download %}
+                <div role="cell" class="download-desktop">
+                {% if line in tickets_with_download %}
+                    {% for b in download_buttons %}
+                        <form action="{% if position_page and line.addon_to %}{% eventurl event "presale:event.order.position.download" secret=line.addon_to.web_secret order=order.code output=b.identifier pid=line.pk position=line.addon_to.positionid %}{% elif position_page %}{% eventurl event "presale:event.order.position.download" secret=line.web_secret order=order.code output=b.identifier pid=line.pk position=line.positionid %}{% else %}{% eventurl event "presale:event.order.download" secret=order.secret order=order.code output=b.identifier position=line.pk %}{% endif %}"
+                                method="post" data-asynctask data-asynctask-download class="download-btn-form{% if b.javascript_required %} requirejs{% endif %}">
+                            {% csrf_token %}
+                            <button type="submit"
+                                    class="btn btn-sm {% if b.identifier == "pdf" %}btn-primary{% else %}btn-default{% endif %}">
+                                <span class="fa {{ b.icon }}" aria-hidden="true"></span> {{ b.text }}
+                            </button>
+                        </form>
+                    {% endfor %}
+                {% endif %}
+                </div>
+            {% elif line.addon_to %}
+                <div role="cell" class="count">{% if line.count == 1 %}&nbsp;{% else %}{{ line.count }}{% endif %}</div>
+                {% if not hide_prices %}
+                    <div role="cell" class="singleprice price">
+                        {% if event.settings.display_net_prices %}
+                            {{ line.net_price|money:event.currency }}
+                        {% else %}
+                            {{ line.price|money:event.currency }}
+                        {% endif %}
+                        {% if line.discount and line.line_price_gross != line.price %}
+                            <span class="text-success discounted" data-toggle="tooltip" title="{% trans "The price of this product was reduced because of an automatic discount." %}">
+                                <br>
+                                <span class="fa fa-star fa-fw" aria-hidden="true"></span>
+                                {% if line.price < line.line_price_gross %}
+                                    {% blocktranslate trimmed with percent=line.discount_percentage|floatformat:0 %}
+                                        {{ percent }} % Discount
+                                    {% endblocktranslate %}
+                                {% else %}
+                                    {% trans "Discounted" %}
+                                {% endif %}
+                            </span>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% else %}
+                <div role="cell" class="count">
+                    {% if editable %}
+                    <form action="{% eventurl event "presale:event.cart.remove" cart_namespace=cart_namespace|default_if_none:"" %}"
+                            data-asynctask-headline="{% trans "Okay, we're removing that…" %}"
+                            method="post" data-asynctask>
+                        {% csrf_token %}
+                        <input type="hidden" name="id" value="{{ line.id }}" />
+                        {% if line.seat or line.count == 1 %}
+                            <button class="btn btn-mini btn-link" title="{% blocktrans with item=line.item.name %}Remove {{item}} from your cart{% endblocktrans %}">
+                                <i class="fa fa-trash" aria-hidden="true"></i>
+                                <span class="sr-only">{% blocktrans with item=line.item.name %}Remove {{item}} from your cart{% endblocktrans %}</span>
+                            </button>
+                        {% else %}
+                            <button class="btn btn-mini btn-link" title="{% blocktrans with item=line.item.name %}Remove one {{item}} from your cart{% endblocktrans %}">
+                                <i class="fa fa-minus" aria-hidden="true"></i>
+                                <span class="sr-only">{% blocktrans with item=line.item.name count=line.count %}Remove one {{item}} from your cart. You currently have {{count }} in your cart.{% endblocktrans %}</span>
+                            </button>
+                        {% endif %}
+                    </form>
+                    {% endif %}
+                    {{ line.count }}
+                    {% if editable %}
+                    <form action="{% eventurl event "presale:event.cart.add" cart_namespace=cart_namespace|default_if_none:"" %}"
+                            data-asynctask-headline="{% trans "We're trying to reserve another one for you!" %}"
+                            data-asynctask-text="{% blocktrans with time=event.settings.reservation_time %}Once the items are in your cart, you will have {{ time }} minutes to complete your purchase.{% endblocktrans %}"
+                        method="post" data-asynctask>
+                        <input type="hidden" name="subevent" value="{{ line.subevent_id|default_if_none:"" }}" />
+                        {% if line.voucher and not line.voucher.seat %}
+                            <input type="hidden" name="_voucher_code" value="{{ line.voucher.code }}" />
+                            <input type="hidden" name="_voucher_ignore_if_redeemed" value="on" />
+                        {% endif %}
+                        {% csrf_token %}
+                        {% if line.variation %}
+                            <input type="hidden" name="variation_{{ line.item.id }}_{{ line.variation.id }}"
+                                value="1" />
+                            <input type="hidden" name="price_{{ line.item.id }}_{{ line.variation.id }}"
+                                    value="{% if event.settings.display_net_prices %}{{ line.price_for_input_net }}{% else %}{{ line.price_for_input }}{% endif %}" />
+                        {% else %}
+                            <input type="hidden" name="item_{{ line.item.id }}"
+                                    value="1" />
+                            <input type="hidden" name="price_{{ line.item.id }}"
+                                   value="{% if event.settings.display_net_prices %}{{ line.price_for_input_net }}{% else %}{{ line.price_for_input }}{% endif %}" />
+                        {% endif %}
+                        <button class="btn btn-mini btn-link {% if line.seat %}btn-invisible{% endif %}" title="{% blocktrans with item=line.item.name %}Add one more {{item}} to your cart{% endblocktrans %}" {% if line.seat %}disabled{% endif %}>
+                            <i class="fa fa-plus" aria-hidden="true"></i>
+                            <span class="sr-only">{% blocktrans with item=line.item.name count=line.count %}Add one more {{item}} to your cart. You currently have {{ count }} in your cart.{% endblocktrans %}</span>
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% if not hide_prices %}
+                    <div role="cell" class="singleprice price">
+                        {% if event.settings.display_net_prices %}
+                            {{ line.net_price|money:event.currency }}
+                        {% else %}
+                            {{ line.price|money:event.currency }}
+                        {% endif %}
+                        {% if line.discount and line.line_price_gross != line.price %}
+                            <span class="text-success discounted" data-toggle="tooltip" title="{% trans "The price of this product was reduced because of an automatic discount." %}">
+                                <br>
+                                <span class="fa fa-star fa-fw" aria-hidden="true"></span>
+                                {% if line.price < line.line_price_gross %}
+                                    {% blocktranslate trimmed with percent=line.discount_percentage|floatformat:0 %}
+                                        {{ percent }} % Discount
+                                    {% endblocktranslate %}
+                                {% else %}
+                                    {% trans "Discounted" %}
+                                {% endif %}
+                            </span>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endif %}
+            {% if not hide_prices %}
+                <div role="cell" class="totalprice price">
+                    {% if event.settings.display_net_prices %}
+                        <strong>{{ line.net_total|money:event.currency }}</strong>
+                        {% if line.tax_rate and line.total %}
+                            <br />
+                            <small>
+                                {% blocktrans trimmed with rate=line.tax_rate|floatformat:-2 taxname=line.tax_rule.name|default:s_taxes %}
+                                    <strong>plus</strong> {{ rate }}% {{ taxname }}
+                                {% endblocktrans %}
+                            </small>
+                        {% endif %}
+                    {% else %}
+                        <strong>{{ line.total|money:event.currency }}</strong>
+                        {% if line.tax_rate and line.total %}
+                            <br />
+                            <small>
+                                {% blocktrans trimmed with rate=line.tax_rate|floatformat:-2 taxname=line.tax_rule.name|default:s_taxes %}
+                                    incl. {{ rate }}% {{ taxname }}
+                                {% endblocktrans %}
+                            </small>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            {% endif %}
+            <div class="clearfix"></div>
+        </div>
+        {% for gc in line.owned_gift_cards.all %}
+            <div class="cart-row-giftcard">
+                <span class="fa fa-credit-card" aria-hidden="true"></span>
+                <strong>{% trans "Gift card" %}</strong>
+                <code>{{ gc.secret }}</code>
+                <strong>{% trans "Current value:" %}</strong>
+                {{ gc.value|money:gc.currency }}
+                <a href="{% if position_page and line.addon_to %}{% eventurl event "presale:event.order.position.giftcard" secret=line.addon_to.web_secret order=order.code pk=gc.pk position=line.addon_to.positionid %}{% elif position_page %}{% eventurl event "presale:event.order.position.giftcard" secret=line.web_secret order=order.code pk=gc.pk position=line.positionid %}{% else %}{% eventurl event "presale:event.order.giftcard" secret=order.secret order=order.code pk=gc.pk %}{% endif %}"
+                   class="btn btn-default btn-sm">
+                    <span class="fa fa-eye" aria-hidden="true"></span>
+                    {% trans "Details" %}
+                </a>
+            </div>
+        {% endfor %}
+    {% endfor %}
+    {% for fee in cart.fees %}
+        <div role="row" class="row cart-row">
+            <div role="cell" class="col-md-4 col-xs-6">
+                {% if fee.fee_type == "other" and fee.description %}
+                    <strong>{{ fee.description }}</strong>
+                {% else %}
+                    <strong>{{ fee.get_fee_type_display }}</strong>
+                {% endif %}
+            </div>
+            {% if download %}
+                <div role="cell"></div>
+            {% else %}
+                <div role="cell"></div>
+                {% if not hide_prices %}
+                    <div role="cell"></div>
+                {% endif %}
+            {% endif %}
+            {% if not hide_prices %}
+                <div role="cell" class="col-md-3 col-xs-6 col-md-offset-5 price">
+                    {% if event.settings.display_net_prices %}
+                        <strong>{{ fee.net_value|money:event.currency }}</strong>
+                        {% if fee.tax_rate %}
+                            <br />
+                            <small>
+                                {% blocktrans trimmed with rate=fee.tax_rate|floatformat:-2 taxname=fee.tax_rule.name|default:s_taxes %}
+                                    <strong>plus</strong> {{ rate }}% {{ taxname }}
+                                {% endblocktrans %}
+                            </small>
+                        {% endif %}
+                    {% else %}
+                        <strong>{{ fee.value|money:event.currency }}</strong>
+                        {% if fee.tax_rate %}
+                            <br />
+                            <small>
+                                {% blocktrans trimmed with rate=fee.tax_rate|floatformat:-2 taxname=fee.tax_rule.name|default:s_taxes %}
+                                    incl. {{ rate }}% {{ taxname }}
+                                {% endblocktrans %}
+                            </small>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            {% endif %}
+            <div class="clearfix"></div>
+        </div>
+    {% endfor %}
+    </div>
+    {% if not hide_prices %}
+        <div role="rowgroup" class="cart-rowgroup-total">
+        {% if event.settings.display_net_prices and cart.tax_total %}
+            <div role="row" class="row cart-row subtotal">
+                <div role="cell" class="product">
+                    <strong>{% trans "Net total" %}</strong>
+                </div>
+                <div role="cell" class="count hidden-xs hidden-sm"></div>
+                <div role="cell" class="singleprice price"></div>
+                <div role="cell" class="totalprice price">
+                    {{ cart.net_total|money:event.currency }}
+                </div>
+                <div class="clearfix"></div>
+            </div>
+            <div role="row" class="row cart-row subtotal">
+                <div role="cell" class="product">
+                    <strong>{% trans "Taxes" %}</strong>
+                </div>
+                <div role="cell" class="count hidden-xs hidden-sm"></div>
+                <div role="cell" class="singleprice price"></div>
+                <div role="cell" class="totalprice price">
+                    {{ cart.tax_total|money:event.currency }}
+                </div>
+                <div class="clearfix"></div>
+            </div>
+        {% endif %}
+            <div role="row" class="row cart-row total">
+                <div role="cell" class="product">
+                    <strong>{% trans "Total" %}</strong><br>
+                    <span class="text-muted">
+                        {% blocktrans trimmed count num=cart.itemcount %}
+                            One product
+                        {% plural %}
+                            {{ num }} products
+                        {% endblocktrans %}
+                    </span>
+                </div>
+                <div role="cell" class="count hidden-xs hidden-sm"></div>
+                <div role="cell" class="singleprice price"></div>
+                <div role="cell" class="totalprice price">
+                    <strong>{{ cart.total|money:event.currency }}</strong>
+
+                    {% if not event.settings.display_net_prices and cart.tax_total %}
+                        <small class="text-muted">
+                            {% blocktrans trimmed with tax_sum=cart.tax_total|money:event.currency %}
+                                incl. {{ tax_sum }} taxes
+                            {% endblocktrans %}
+                        </small>
+                    {% endif %}
+                </div>
+                <div class="clearfix"></div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% if cart.show_rounding_info %}
+    <div class="text-muted">
+        <small>
+            {% icon "info-circle" %}
+            {% blocktrans trimmed %}
+                Since you entered a business address, your price was computed from the
+                VAT-exclusive price. Due to rounding, this caused a small change to the
+                total price.
+            {% endblocktrans %}
+        </small>
+    </div>
+{% endif %}
+<div class="row">
+    <div class="col-md-12">
+    {% if not cart.is_ordered %}
+        <form class="text-muted" id="cart-extend-form" data-asynctask data-asynctask-no-redirect
+                method="post" action="{% eventurl request.event "presale:event.cart.extend" cart_namespace=cart_namespace %}">
+            {% csrf_token %}
+            <p id="cart-deadline" data-expires="{{ cart.first_expiry|date:"Y-m-d H:i:sO" }}" data-max-expiry-extend="{{ cart.max_expiry_extend|date:"Y-m-d H:i:sO" }}">
+                {% if cart.minutes_left > 0 or cart.seconds_left > 0 %}
+                    {% blocktrans trimmed with minutes=cart.minutes_left %}
+                        The items in your cart are reserved for you for {{ minutes }} minutes.
+                    {% endblocktrans %}
+                {% else %}
+                    {% trans "The items in your cart are no longer reserved for you. You can still complete your order as long as they’re available." %}
+                {% endif %}
+            </p>
+            <p>
+                <button class="btn btn-default" type="submit" id="cart-extend-button" aria-describedby="cart-deadline">
+                    {% icon "refresh" %} {% trans "Renew reservation" %}
+                </button>
+            </p>
+        </form>
+
+        <dialog role="alertdialog" id="cart-extend-confirmation-dialog" class="inline-dialog" aria-labelledby="cart-deadline">
+            <form method="dialog">
+                <p>
+                    <button class="btn btn-success" value="OK">
+                        <span role="img" aria-label="{% trans "OK" %}.">
+                            {% icon "check" %}
+                        </span>
+                        {% trans "Reservation renewed" %}
+                    </button>
+                </p>
+            </form>
+        </dialog>
+    {% else %}
+        <p class="sr-only" id="cart-description">{% trans "Overview of your ordered products." %}</p>
+    {% endif %}
+    </div>
+    <div class="clearfix"></div>
+</div>

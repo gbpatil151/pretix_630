@@ -1,0 +1,394 @@
+{% load i18n %}
+{% load l10n %}
+{% load eventurl %}
+{% load money %}
+{% load thumb %}
+{% load eventsignal %}
+{% load rich_text %}
+{% for c in form.categories %}
+    {% with category_idx=forloop.counter %}
+    <fieldset data-addon-max-count="{{ c.max_count }}"{% if c.multi_allowed %} data-addon-multi-allowed{% endif %}>
+        <legend>{{ c.category.name }}</legend>
+        {% if c.category.description %}
+            {{ c.category.description|rich_text }}
+        {% endif %}
+        {% if c.min_count == c.max_count %}
+            <p class="addon-count-desc" id="c-{{ form.pos.pk }}-{{ category_idx }}-addon-count-desc">
+                {% blocktrans trimmed count min_count=c.min_count %}
+                    You need to choose exactly one option from this category.
+                {% plural %}
+                    You need to choose {{ min_count }} options from this category.
+                {% endblocktrans %}
+            </p>
+        {% elif c.min_count == 0 and c.max_count >= c.items|length and not c.multi_allowed %}
+        {% elif c.min_count == 0 %}
+            <p class="addon-count-desc" id="c-{{ form.pos.pk }}-{{ category_idx }}-addon-count-desc">
+                {% blocktrans trimmed count max_count=c.max_count %}
+                    You can choose one option from this category.
+                {% plural %}
+                    You can choose up to {{ max_count }} options from this category.
+                {% endblocktrans %}
+            </p>
+        {% else %}
+            <p class="addon-count-desc" id="c-{{ form.pos.pk }}-{{ category_idx }}-addon-count-desc">
+                {% blocktrans trimmed with min_count=c.min_count max_count=c.max_count %}
+                    You can choose between {{ min_count }} and {{ max_count }} options from
+                    this category.
+                {% endblocktrans %}
+            </p>
+        {% endif %}
+        {% for item in c.items %}
+            {% if item.has_variations %}
+                <article aria-labelledby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend"{% if item.description %} aria-describedby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-description"{% endif %} class="item-with-variations{% if event.settings.show_variations_expanded %} details-open{% endif %}" id="item-{{ item.pk }}">
+                    <div class="row-fluid product-row headline">
+                        <div class="col-md-8 col-sm-6 col-xs-12">
+                            {% if item.picture %}
+                                <a href="{{ item.picture.url }}" class="productpicture"
+                                        data-title="{{ item.name|force_escape|force_escape }}"
+                                        {# Yes, double-escape to prevent XSS in lightbox #}
+                                        data-lightbox="{{ item.id }}">
+                                    <img src="{{ item.picture|thumb:'60x60^' }}"
+                                            alt="{{ item.name }}"/>
+                                </a>
+                            {% endif %}
+                            <div class="product-description {% if item.picture %}with-picture{% endif %}">
+                                <h4 id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend">{{ item.name }}</h4>
+                                {% if item.description %}
+                                    <div id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-description" class="product-description">
+                                        {{ item.description|localize|rich_text }}
+                                    </div>
+                                {% endif %}
+                                {% if item.min_per_order and item.min_per_order > 1 %}
+                                    <p id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-min-order">
+                                        <small>
+                                            {% blocktrans trimmed with num=item.min_per_order %}
+                                                minimum amount to order: {{ num }}
+                                            {% endblocktrans %}
+                                        </small>
+                                    </p>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-2 col-sm-3 col-xs-6 price">
+                            <p>
+                                {% if not hide_prices %}
+                                {% if c.price_included %}
+                                    <span class="sr-only">{% trans "free" context "price" %}</span>
+                                {% elif item.free_price %}
+                                    {% blocktrans trimmed with price=item.min_price|money:event.currency %}
+                                        from {{ price }}
+                                    {% endblocktrans %}
+                                {% elif item.min_price != item.max_price %}
+                                    <span class="sr-only">
+                                                            {% blocktrans trimmed with from_price=item.min_price|money:event.currency to_price=item.max_price|money:event.currency  %}
+                                                                from {{ from_price }} to {{ to_price }}
+                                                            {% endblocktrans %}
+                                                            </span>
+                                    <span aria-hidden="true">{{ item.min_price|money:event.currency }} – {{ item.max_price|money:event.currency }}</span>
+                                {% elif not item.min_price and not item.max_price %}
+                                {% else %}
+                                    {{ item.min_price|money:event.currency }}
+                                {% endif %}
+                                {% endif %}
+                            </p>
+                        </div>
+                        <div class="col-md-2 col-sm-3 col-xs-6 availability-box">
+                            {% if not event.settings.show_variations_expanded %}
+                                <button type="button" data-toggle="variations" class="btn btn-default btn-block js-only"
+                                        data-label-alt="{% trans "Hide variants" %}"
+                                        aria-expanded="false" aria-controls="cp-{{ form.pos.pk }}-item-{{ item.pk }}-variations"
+                                        aria-describedby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend">
+                                    <i class="fa fa-angle-down collapse-indicator" aria-hidden="true"></i>
+                                    <span>{% trans "Show variants" %}</span>
+                                </button>
+                            {% endif %}
+                        </div>
+                        <div class="clearfix"></div>
+                    </div>
+                    <div class="variations {% if not event.settings.show_variations_expanded %}variations-collapsed{% endif %}" id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-variations">
+                        {% for var in item.available_variations %}
+                            <article aria-labelledby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-{{ var.pk }}-legend"{% if var.description %} aria-describedby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-{{ var.pk }}-description"{% endif %} class="row-fluid product-row variation"
+                            {% if not item.free_price %}
+                                data-price="{% if event.settings.display_net_prices %}{{ var.display_price.net|unlocalize }}{% else %}{{ var.display_price.gross|unlocalize }}{% endif %}"
+                            {% endif %}>
+                                <div class="col-md-8 col-sm-6 col-xs-12">
+                                    <h5 id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-{{ var.pk }}-legend">{{ var }}</h5>
+                                    {% if var.description %}
+                                        <div id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-{{ var.pk }}-description" class="variation-description">
+                                            {{ var.description|localize|rich_text }}
+                                        </div>
+                                    {% endif %}
+                                    {% if item.do_show_quota_left %}
+                                        {% include "pretixpresale/event/fragment_quota_left.html" with avail=var.cached_availability %}
+                                    {% endif %}
+                                </div>
+                                <div class="col-md-2 col-sm-3 col-xs-6 price">
+                                    {% if not hide_prices %}
+                                    {% if not c.price_included %}
+                                        {% if var.original_price %}
+                                            <del><span class="sr-only">{% trans "Original price:" %}</span>
+                                                {% if event.settings.display_net_prices %}
+                                                    {{ var.original_price.net|money:event.currency }}
+                                                {% else %}
+                                                    {{ var.original_price.gross|money:event.currency }}
+                                                {% endif %}
+                                            </del>
+                                            <ins><span class="sr-only">{% trans "New price:" %}</span>
+                                        {% endif %}
+                                        {% if item.free_price %}
+                                            <div class="input-group input-group-price">
+                                                <span class="input-group-addon">{{ event.currency }}</span>
+                                                <input type="number" class="form-control input-item-price"
+                                                        id="price-variation-{{form.pos.pk}}-{{ item.pk }}-{{ var.pk }}"
+                                                        placeholder="0"
+                                                        min="{% if event.settings.display_net_prices %}{{ var.display_price.net|money_numberfield:event.currency }}{% else %}{{ var.display_price.gross|money_numberfield:event.currency }}{% endif %}"
+                                                        name="cp_{{ form.pos.pk }}_variation_{{ item.id }}_{{ var.id }}_price"
+                                                        {% if var.initial_price.gross != var.display_price.gross %}
+                                                            {% if event.settings.display_net_prices %}
+                                                                title="{% blocktrans trimmed with item=var.value price=var.display_price.net|money:event.currency %}Modify price for {{ item }}, at least {{ price }}{% endblocktrans %}"
+                                                            {% else %}
+                                                                title="{% blocktrans trimmed with item=var.value price=var.display_price.gross|money:event.currency %}Modify price for {{ item }}, at least {{ price }}{% endblocktrans %}"
+                                                            {% endif %}
+                                                        {% else %}
+                                                            title="{% blocktrans trimmed with item=var.value %}Modify price for {{ item }}{% endblocktrans %}"
+                                                        {% endif %}
+                                                        step="any"
+                                                        value="{% if event.settings.display_net_prices %}{{ var.initial_price.net|money_numberfield:event.currency }}{% else %}{{ var.initial_price.gross|money_numberfield:event.currency }}{% endif %}"
+                                                >
+                                            </div>
+                                        {% elif not var.display_price.gross %}
+                                            <span class="text-uppercase">{% trans "free" context "price" %}</span>
+                                        {% elif event.settings.display_net_prices %}
+                                            {{ var.display_price.net|money:event.currency }}
+                                        {% else %}
+                                            {{ var.display_price.gross|money:event.currency }}
+                                        {% endif %}
+                                        {% if item.original_price or var.original_price %}
+                                            </ins>
+                                        {% endif %}
+                                        {% if item.includes_mixed_tax_rate %}
+                                            {% if event.settings.display_net_prices %}
+                                                <small>{% trans "plus taxes" %}</small>
+                                            {% else %}
+                                                <small>{% trans "incl. taxes" %}</small>
+                                            {% endif %}
+                                        {% elif var.display_price.rate and var.display_price.gross and event.settings.display_net_prices %}
+                                            <small>{% blocktrans trimmed with rate=var.display_price.rate|floatformat:-2 name=var.display_price.name %}
+                                                <strong>plus</strong> {{ rate }}% {{ name }}
+                                            {% endblocktrans %}</small>
+                                        {% elif var.display_price.rate and var.display_price.gross %}
+                                            <small>{% blocktrans trimmed with rate=var.display_price.rate|floatformat:-2 name=var.display_price.name %}
+                                                incl. {{ rate }}% {{ name }}
+                                            {% endblocktrans %}</small>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="sr-only">{% trans "free" context "price" %}</span>
+                                    {% endif %}
+                                    {% endif %}
+                                </div>
+                                {% if not item.current_unavailability_reason and not var.current_unavailability_reason and var.cached_availability.0 == 100 or var.initial %}
+                                    <div class="col-md-2 col-sm-3 col-xs-6 availability-box available">
+                                        {% if c.max_count == 1 or not c.multi_allowed %}
+                                            <label class="btn btn-default btn-checkbox">
+                                                <input type="checkbox" value="1"
+                                                        {% if var.initial %}checked="checked"{% endif %}
+                                                        {% if item.free_price %}
+                                                           data-checked-onchange="price-variation-{{form.pos.pk}}-{{ item.pk }}-{{ var.pk }}"
+                                                        {% endif %}
+                                                        id="cp_{{ form.pos.pk }}_variation_{{ item.id }}_{{ var.id }}"
+                                                        name="cp_{{ form.pos.pk }}_variation_{{ item.id }}_{{ var.id }}"
+                                                        aria-labelledby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-{{ var.pk }}-legend cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend"
+                                                        aria-describedby="c-{{ form.pos.pk }}-{{ category_idx }}-addon-count-desc">
+                                                <i class="fa fa-shopping-cart" aria-hidden="true"></i>
+                                                {% trans "Select" context "checkbox" %}
+                                            </label>
+                                        {% else %}
+                                            <fieldset class="input-item-count-group" aria-describedby="c-{{ form.pos.pk }}-{{ category_idx }}-addon-count-desc cp-{{ form.pos.pk }}-item-{{ item.pk }}-min-order">
+                                                <legend class="sr-only">{% trans "Quantity" %}</legend>
+                                                <button type="button" data-step="-1" data-controls="cp_{{ form.pos.pk }}_variation_{{ item.id }}_{{ var.id }}" class="btn btn-default input-item-count-dec" aria-label="- {{ item }}, {{ var }}: {% trans "Decrease quantity" %}">-</button>
+                                                <input type="number" class="form-control input-item-count" placeholder="0" min="0"
+                                                    {% if var.initial %}value="{{ var.initial }}"{% endif %}
+                                                    {% if item.free_price %}
+                                                       data-checked-onchange="price-variation-{{form.pos.pk}}-{{ item.pk }}-{{ var.pk }}"
+                                                    {% endif %}
+                                                    max="{{ c.max_count }}"
+                                                    id="cp_{{ form.pos.pk }}_variation_{{ item.id }}_{{ var.id }}"
+                                                    name="cp_{{ form.pos.pk }}_variation_{{ item.id }}_{{ var.id }}"
+                                                    aria-labelledby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-{{ var.pk }}-legend cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend">
+                                                <button type="button" data-step="1" data-controls="cp_{{ form.pos.pk }}_variation_{{ item.id }}_{{ var.id }}" class="btn btn-default input-item-count-inc" aria-label="+ {{ item }}, {{ var }}: {% trans "Increase quantity" %}">+</button>
+                                            </fieldset>
+                                        {% endif %}
+                                    </div>
+                                {% else %}
+                                    {% include "pretixpresale/event/fragment_availability.html" with price=var.display_price.gross original_price=var.original_price.gross avail=var.cached_availability.0 event=event item=item var=var %}
+                                {% endif %}
+                                <div class="clearfix"></div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+            {% else %}
+                <article aria-labelledby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend"{% if item.description %} aria-describedby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-description"{% endif %} class="row-fluid product-row simple"
+                {% if not item.free_price %}
+                    data-price="{% if event.settings.display_net_prices %}{{ item.display_price.net|unlocalize }}{% else %}{{ item.display_price.gross|unlocalize }}{% endif %}"
+                {% endif %}>
+                    <div class="col-md-8 col-sm-6 col-xs-12">
+                        {% if item.picture %}
+                            <a href="{{ item.picture.url }}" class="productpicture"
+                                    data-title="{{ item.name|force_escape|force_escape }}"
+                                    {# Yes, double-escape to prevent XSS in lightbox #}
+                                    data-lightbox="{{ item.id }}">
+                                <img src="{{ item.picture|thumb:'60x60^' }}"
+                                        alt="{{ item.name }}"/>
+                            </a>
+                        {% endif %}
+                        <div class="product-description {% if item.picture %}with-picture{% endif %}">
+                            <h4 id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend">{{ item.name }}</h4>
+                            {% if item.description %}
+                                <div id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-description" class="product-description">
+                                    {{ item.description|localize|rich_text }}
+                                </div>
+                            {% endif %}
+                            {% if item.do_show_quota_left %}
+                                {% include "pretixpresale/event/fragment_quota_left.html" with avail=item.cached_availability %}
+                            {% endif %}
+                            {% if item.min_per_order and item.min_per_order > 1 %}
+                                <p id="cp-{{ form.pos.pk }}-item-{{ item.pk }}-min-order">
+                                    <small>
+                                        {% blocktrans trimmed with num=item.min_per_order %}
+                                            minimum amount to order: {{ num }}
+                                        {% endblocktrans %}
+                                    </small>
+                                </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-2 col-sm-3 col-xs-6 price">
+                        <p>
+                            {% if not hide_prices %}
+                            {% if not c.price_included %}
+                                {% if item.original_price %}
+                                    <del><span class="sr-only">{% trans "Original price:" %}</span>
+                                        {% if event.settings.display_net_prices %}
+                                            {{ item.original_price.net|money:event.currency }}
+                                        {% else %}
+                                            {{ item.original_price.gross|money:event.currency }}
+                                        {% endif %}
+                                    </del>
+                                    <ins><span class="sr-only">{% trans "New price:" %}</span>
+                                {% endif %}
+                                {% if item.free_price %}
+                                    <div class="input-group input-group-price">
+                                        <span class="input-group-addon">{{ event.currency }}</span>
+                                        <input type="number" class="form-control input-item-price" placeholder="0"
+                                                id="price-item-{{ form.pos.pk }}-{{ item.pk }}"
+                                                min="{% if event.settings.display_net_prices %}{{ item.display_price.net|money_numberfield:event.currency }}{% else %}{{ item.display_price.gross|money_numberfield:event.currency }}{% endif %}"
+                                                name="cp_{{ form.pos.pk }}_item_{{ item.id }}_price"
+                                                {% if item.initial_price.gross != item.display_price.gross %}
+                                                    {% if event.settings.display_net_prices %}
+                                                        title="{% blocktrans trimmed with item=item.name price=item.display_price.net|money:event.currency %}Modify price for {{ item }}, at least {{ price }}{% endblocktrans %}"
+                                                    {% else %}
+                                                        title="{% blocktrans trimmed with item=item.name price=item.display_price.gross|money:event.currency %}Modify price for {{ item }}, at least {{ price }}{% endblocktrans %}"
+                                                    {% endif %}
+                                                {% else %}
+                                                    title="{% blocktrans trimmed with item=item.name %}Modify price for {{ item }}{% endblocktrans %}"
+                                                {% endif %}
+                                                value="{% if event.settings.display_net_prices %}{{ item.initial_price.net|money_numberfield:event.currency }}{% else %}{{ item.initial_price.gross|money_numberfield:event.currency }}{% endif %}"
+                                                step="any">
+                                    </div>
+                                {% elif not item.display_price.gross %}
+                                    <span class="text-uppercase">{% trans "free" context "price" %}</span>
+                                {% elif event.settings.display_net_prices %}
+                                    {{ item.display_price.net|money:event.currency }}
+                                {% else %}
+                                    {{ item.display_price.gross|money:event.currency }}
+                                {% endif %}
+                                {% if item.original_price %}
+                                    </ins>
+                                {% endif %}
+                                {% if item.includes_mixed_tax_rate %}
+                                    {% if event.settings.display_net_prices %}
+                                        <small>{% trans "plus taxes" %}</small>
+                                    {% else %}
+                                        <small>{% trans "incl. taxes" %}</small>
+                                    {% endif %}
+                                {% elif item.display_price.rate and item.display_price.gross and event.settings.display_net_prices %}
+                                    <small>{% blocktrans trimmed with rate=item.display_price.rate|floatformat:-2 name=item.display_price.name %}
+                                        <strong>plus</strong> {{ rate }}% {{ name }}
+                                    {% endblocktrans %}</small>
+                                {% elif item.display_price.rate and item.display_price.gross %}
+                                    <small>{% blocktrans trimmed with rate=item.display_price.rate|floatformat:-2 name=item.display_price.name %}
+                                        incl. {{ rate }}% {{ name }}
+                                    {% endblocktrans %}</small>
+                                {% endif %}
+                            {% else %}
+                                <span class="sr-only">{% trans "free" context "price" %}</span>
+                            {% endif %}
+                            {% endif %}
+                        </p>
+                    </div>
+                    {% if not item.current_unavailability_reason and item.cached_availability.0 == 100 or item.initial %}
+                        <div class="col-md-2 col-sm-3 col-xs-6 availability-box available">
+                            {% if c.max_count == 1 or not c.multi_allowed %}
+                                <label class="btn btn-default btn-checkbox">
+                                    <input type="checkbox" value="1"
+                                            {% if item.free_price %}
+                                               data-checked-onchange="price-item-{{ form.pos.pk }}-{{ item.pk }}"
+                                            {% endif %}
+                                            {% if c.max_count == 1 and c.min_count == 1 and c.items|length == 1 %}
+                                                checked="checked"
+                                                required="required"
+                                            {% elif item.initial %}
+                                                checked="checked"
+                                            {% endif %}
+                                            name="cp_{{ form.pos.pk }}_item_{{ item.id }}"
+                                            id="cp_{{ form.pos.pk }}_item_{{ item.id }}"
+                                            aria-labelledby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend"
+                                            aria-describedby="c-{{ form.pos.pk }}-{{ category_idx }}-addon-count-desc">
+                                            <i class="fa fa-shopping-cart" aria-hidden="true"></i>
+                                            {% trans "Select" context "checkbox" %}
+                                </label>
+                            {% else %}
+                                <fieldset class="input-item-count-group" aria-describedby="c-{{ form.pos.pk }}-{{ category_idx }}-addon-count-desc cp-{{ form.pos.pk }}-item-{{ item.pk }}-min-order">
+                                    <legend class="sr-only">{% trans "Quantity" %}</legend>
+                                    <button type="button" data-step="-1" data-controls="cp_{{ form.pos.pk }}_item_{{ item.id }}" class="btn btn-default input-item-count-dec" aria-label="- {{ item }}: {% trans "Decrease quantity" %}">-</button>
+                                    <input type="number" class="form-control input-item-count" placeholder="0" min="0"
+                                        {% if item.free_price %}
+                                           data-checked-onchange="price-item-{{ form.pos.pk }}-{{ item.pk }}"
+                                        {% endif %}
+                                        max="{{ c.max_count }}"
+                                        {% if item.initial %}value="{{ item.initial }}"{% endif %}
+                                        name="cp_{{ form.pos.pk }}_item_{{ item.id }}"
+                                        id="cp_{{ form.pos.pk }}_item_{{ item.id }}"
+                                        aria-labelledby="cp-{{ form.pos.pk }}-item-{{ item.pk }}-legend">
+                                    <button type="button" data-step="1" data-controls="cp_{{ form.pos.pk }}_item_{{ item.id }}" class="btn btn-default input-item-count-inc" aria-label="+ {{ item }}: {% trans "Increase quantity" %}">+</button>
+                                </fieldset>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        {% include "pretixpresale/event/fragment_availability.html" with price=item.display_price.gross original_price=item.original_price.gross avail=item.cached_availability.0 event=event item=item var=0 %}
+                    {% endif %}
+                    <div class="clearfix"></div>
+                </article>
+            {% endif %}
+        {% endfor %}
+
+        {% if c.items_missing %}
+            <div class="product-appendix-row">
+                <p class="text-muted">
+                    {% trans "There are products selected in this add-on category that currently cannot be changed because they are not on sale:" %}
+                </p>
+                <ul class="text-muted">
+                    {% for itemvar, count in c.items_missing.items %}
+                        <li>{{ count }}x {{ itemvar.0 }}{% if itemvar.1 %} – {{ itemvar.1 }}{% endif %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+    </fieldset>
+    {% endwith %}
+{% empty %}
+    <em>
+        {% trans "There are no add-ons available for this product." %}
+    </em>
+{% endfor %}

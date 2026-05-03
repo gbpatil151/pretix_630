@@ -1,0 +1,66 @@
+{% extends "pretixcontrol/event/base.html" %}
+{% load i18n %}
+{% load bootstrap3 %}
+{% block title %}{% trans "Data export" %}{% endblock %}
+{% block content %}
+    <h1>
+        {% trans "Data export" %}
+        {% if exporter %}
+            <small>
+                {{ exporter.verbose_name }}
+            </small>
+        {% endif %}
+    </h1>
+    {% if exporter.description %}
+        <p class="help-block">{{ exporter.description }}</p>
+    {% endif %}
+    {% if schedule_form %}
+        {% bootstrap_form_errors schedule_form layout='control' %}
+    {% endif %}
+    <form action="{% url "control:event.orders.export.do" event=request.event.slug organizer=request.organizer.slug %}"
+          method="post" class="form-horizontal" data-asynctask data-asynctask-download
+          data-asynctask-long>
+        {% csrf_token %}
+        <input type="hidden" name="exporter" value="{{ exporter.identifier }}"/>
+        <fieldset>
+            <legend>{% trans "Export options" %}</legend>
+            {% bootstrap_form exporter.form layout='control' %}
+
+            {% if "_format" in exporter.form.fields and exporter.multisheet_warning %}
+                <div data-display-dependency="#id_{{ exporter.form.prefix }}-_format" data-display-dependency-value="xlsx">
+                    <div class="alert alert-info">
+                        {% blocktrans trimmed %}
+                            Your generated Excel file will have <strong>multiple sheets</strong>. Some data you are
+                            looking for might not be on the first sheet.
+                        {% endblocktrans %}
+                    </div>
+                </div>
+            {% endif %}
+        </fieldset>
+        {% if schedule_form %}
+            {% include "pretixcontrol/orders/fragment_export_schedule_form.html" %}
+            <div class="form-group submit-group">
+                <button formaction="{{ request.get_full_path }}" name="schedule" value="save" type="submit"
+                        class="btn btn-primary btn-save" data-no-asynctask>
+                    {% if scheduled_copy_from %}
+                        {% trans "Save copy" %}
+                    {% else %}
+                        {% trans "Save" %}
+                    {% endif %}
+                </button>
+            </div>
+        {% else %}
+            <div class="form-group submit-group">
+                <button type="submit" class="btn btn-primary btn-save">
+                    <span class="fa fa-download" aria-hidden="true"></span>
+                    {% trans "Start export" %}
+                </button>
+                <button formaction="{{ request.get_full_path }}" name="schedule" value="start" type="submit"
+                        class="btn btn-default btn-alternative" data-no-asynctask>
+                    <span class="fa fa-clock-o" aria-hidden="true"></span>
+                    {% trans "Schedule export" %}
+                </button>
+            </div>
+        {% endif %}
+    </form>
+{% endblock %}

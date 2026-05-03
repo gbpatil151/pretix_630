@@ -1,0 +1,160 @@
+[project]
+name = "pretix"
+dynamic = ["version"]
+description = "Reinventing presales, one ticket at a time"
+readme = "README.rst"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+keywords = ["tickets", "web", "shop", "ecommerce"]
+authors = [
+  {name = "pretix team", email = "support@pretix.eu"},
+]
+maintainers = [
+  {name = "pretix team", email = "support@pretix.eu"},
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Other Audience",
+  "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+  "Environment :: Web Environment",
+  "License :: OSI Approved :: GNU Affero General Public License v3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Framework :: Django :: 4.2",
+]
+
+dependencies = [
+  "arabic-reshaper==3.0.0",  # Support for Arabic in reportlab
+  "babel",
+  "BeautifulSoup4==4.14.*",
+  "bleach==6.3.*",
+  "celery==5.6.*",
+  "chardet==5.2.*",
+  "cryptography>=44.0.0",
+  "css-inline==0.20.*",
+  "defusedcsv>=1.1.0",
+  "dnspython==2.*",
+  "Django[argon2]==4.2.*,>=4.2.26",
+  "django-bootstrap3==26.1",
+  "django-compressor==4.6.0",
+  "django-countries==8.2.*",
+  "django-filter==25.1",
+  "django-formset-js-improved==0.5.0.5",
+  "django-formtools==2.5.1",
+  "django-hierarkey==2.0.*,>=2.0.1",
+  "django-hijack==3.7.*",
+  "django-i18nfield==1.11.*",
+  "django-libsass==0.9",
+  "django-localflavor==5.0",
+  "django-markup",
+  "django-oauth-toolkit==2.3.*",
+  "django-otp==1.7.*",
+  "django-phonenumber-field==8.4.*",
+  "django-redis==6.0.*",
+  "django-scopes==2.0.*",
+  "django-statici18n==2.6.*",
+  "djangorestframework==3.16.*",
+  "dnspython==2.8.*",
+  "drf_ujson2==1.7.*",
+  "geoip2==5.*",
+  "importlib_metadata==8.*",  # Polyfill, we can probably drop this once we require Python 3.10+
+  "isoweek",
+  "jsonschema",
+  "kombu==5.6.*",
+  "libsass==0.23.*",
+  "lxml",
+  "markdown==3.10.2",  # 3.3.5 requires importlib-metadata>=4.4, but django-bootstrap3 requires importlib-metadata<3.
+  # We can upgrade markdown again once django-bootstrap3 upgrades or once we drop Python 3.6 and 3.7
+  "mt-940==4.30.*",
+  "oauthlib==3.3.*",
+  "openpyxl==3.1.*",
+  "packaging",
+  "paypalrestsdk==1.13.*",
+  "paypal-checkout-serversdk==1.0.*",
+  "PyJWT==2.11.*",
+  "phonenumberslite==9.0.*",
+  "Pillow==12.1.*",
+  "pretix-plugin-build",
+  "protobuf==6.33.*",
+  "psycopg2-binary",
+  "pycountry",
+  "pycparser==3.0",
+  "pycryptodome==3.23.*",
+  "pypdf==6.5.*",
+  "python-bidi==0.6.*",  # Support for Arabic in reportlab
+  "python-dateutil==2.9.*",
+  "pytz",
+  "pytz-deprecation-shim==0.1.*",
+  "pyuca",
+  "qrcode==8.2",
+  "redis==7.1.*",
+  "reportlab==4.4.*",
+  "requests==2.32.*",
+  "sentry-sdk==2.53.*",
+  "sepaxml==2.7.*",
+  "stripe==7.9.*",
+  "text-unidecode==1.*",
+  "tlds>=2020041600",
+  "tqdm==4.*",
+  "ua-parser==1.0.*",
+  "vobject==0.9.*",
+  "webauthn==2.7.*",
+  "zeep==4.3.*"
+]
+
+[project.optional-dependencies]
+memcached = ["pylibmc"]
+dev = [
+  "aiohttp==3.13.*",
+  "coverage",
+  "coveralls",
+  "fakeredis==2.34.*",
+  "flake8==7.3.*",
+  "freezegun",
+  "isort==8.0.*",
+  "pep8-naming==0.15.*",
+  "potypo",
+  "pytest-asyncio>=0.24",
+  "pytest-cache",
+  "pytest-cov",
+  "pytest-django==4.*",
+  "pytest-mock==3.15.*",
+  "pytest-sugar",
+  "pytest-xdist==3.8.*",
+  "pytest==9.0.*",
+  "responses",
+]
+
+[project.entry-points."distutils.commands"]
+build = "pretix._build:CustomBuild"
+build_ext = "pretix._build:CustomBuildExt"
+
+[build-system]
+build-backend = "backend"
+backend-path = ["_build"]
+requires = [
+  "setuptools",
+  "setuptools-rust",
+  "wheel",
+  "importlib_metadata",
+  "tomli",
+]
+
+[project.urls]
+homepage = "https://pretix.eu"
+documentation = "https://docs.pretix.eu"
+repository = "https://github.com/pretix/pretix.git"
+changelog = "https://pretix.eu/about/en/blog/"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "pretix.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pretix*"]
+namespaces = false

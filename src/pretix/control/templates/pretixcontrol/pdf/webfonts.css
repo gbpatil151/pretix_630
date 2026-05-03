@@ -1,0 +1,51 @@
+{% load static %}
+
+@font-face {
+    font-family: 'AND';
+    font-style: normal;
+    font-weight: normal;
+    src: url('{% static "fonts/AND-Regular.ttf" %}') format('truetype');
+}
+@font-face {
+    font-family: 'AND';
+    font-style: normal;
+    font-weight: bold;
+    src: url('{% static "fonts/AND-Regular.ttf" %}') format('truetype');
+}
+
+{% for family, styles in fonts.items %}
+{% for style, formats in styles.items %}
+{% if "sample" not in style and "pdf_only" not in style %}
+@font-face {
+    font-family: '{{ family }}';
+    {% if style == "italic" or style == "bolditalic" %}
+        font-style: italic;
+    {% else %}
+        font-style: normal;
+    {% endif %}
+    {% if style == "bold" or style == "bolditalic" %}
+        font-weight: bold;
+    {% else %}
+        font-weight: normal;
+    {% endif %}
+    src: {% if "woff2" in formats %}{% if '//' in formats.woff2 %}url('{{ formats.woff2 }}'){% else %}url('{% static formats.woff2 %}'){% endif %} format('woff2'),{% endif %}
+         {% if "woff" in formats %}{% if '//' in formats.woff %}url('{{ formats.woff }}'){% else %}url('{% static formats.woff %}'){% endif %} format('woff'),{% endif %}
+         {% if "truetype" in formats %}{% if '//' in formats.truetype %}url('{{ formats.truetype }}'){% else %}url('{% static formats.truetype %}'){% endif %} format('truetype'){% endif %};
+}
+.preload-font[data-family="{{family}}"][data-style="{{style}}"] {
+    font-family: '{{ family }}', 'AND';
+    {% if style == "italic" or style == "bolditalic" %}
+        font-style: italic;
+    {% else %}
+        font-style: normal;
+    {% endif %}
+    {% if style == "bold" or style == "bolditalic" %}
+        font-weight: bold;
+    {% else %}
+        font-weight: normal;
+    {% endif %}
+
+}
+{% endif %}
+{% endfor %}
+{% endfor %}

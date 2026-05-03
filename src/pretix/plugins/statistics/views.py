@@ -1,0 +1,337 @@
+#
+# This file is part of pretix (Community Edition).
+#
+# Copyright (C) 2014-2020  Raphael Michel and contributors
+# Copyright (C) 2020-today pretix GmbH and contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+# Public License as published by the Free Software Foundation in version 3 of the License.
+#
+# ADDITIONAL TERMS APPLY: Pursuant to Section 7 of the GNU Affero General Public License, additional terms are
+# applicable granting you additional permissions and placing additional restrictions on your usage of this software.
+# Please refer to the pretix LICENSE file to obtain the full terms applicable to this work. If you did not receive
+# this file, see <https://pretix.eu/about/en/license>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
+# <https://www.gnu.org/licenses/>.
+#
+
+# This file is based on an earlier version of pretix which was released under the Apache License 2.0. The full text of
+# the Apache License 2.0 can be obtained at <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+# This file may have since been changed and any changes are released under the terms of AGPLv3 as described above. A
+# full history of changes and contributors is available at <https://github.com/pretix/pretix>.
+#
+# This file contains Apache-licensed contributions copyrighted by: Tobias Kunze
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the Apache License 2.0 is
+# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under the License.
+
+import datetime
+import json
+from decimal import Decimal
+
+import dateutil.parser
+import dateutil.rrule
+from django.db.models import Count, DateTimeField, Max, Min, OuterRef, Subquery
+from django.utils import timezone
+from django.views.generic import TemplateView
+
+from pretix.base.models import (
+    Item, Order, OrderPayment, OrderPosition, SubEvent,
+)
+from pretix.control.permissions import EventPermissionRequiredMixin
+from pretix.control.views import ChartContainingView
+from pretix.plugins.statistics.signals import clear_cache
+
+
+class IndexView(EventPermissionRequiredMixin, ChartContainingView, TemplateView):
+    template_name = 'pretixplugins/statistics/index.html'
+    permission = 'can_view_orders'
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        tz = timezone.get_current_timezone()
+
+        if 'latest' in self.request.GET:
+            clear_cache(self.request.event)
+
+        subevent = None
+        if self.request.GET.get("subevent", "") != "" and self.request.event.has_subevents:
+            i = self.request.GET.get("subevent", "")
+            try:
+                subevent = self.request.event.subevents.get(pk=i)
+            except SubEvent.DoesNotExist:
+                pass
+
+        cache = self.request.event.cache
+        ckey = str(subevent.pk) if subevent else 'all'
+
+        # Payment-date subqueries shared by several chart builders
+        p_date = self._payment_date_subquery(OuterRef('pk'))
+        op_date = self._payment_date_subquery(OuterRef('order'))
+
+        # Delegate each chart section to its own helper
+        self._build_orders_by_day_data(ctx, cache, ckey, subevent, tz, p_date)
+        self._build_attendees_by_day_data(ctx, cache, ckey, subevent, tz, op_date)
+        self._build_orders_by_product_data(ctx, cache, ckey, subevent)
+        self._build_revenue_data(ctx, cache, ckey, subevent, tz, p_date, op_date)
+
+        ctx['has_orders'] = self.request.event.orders.exists()
+        ctx['seats'] = {}
+        self._build_seats_data(ctx, ckey, subevent)
+
+        return ctx
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _payment_date_subquery(outer_ref):
+        """Return a Subquery that resolves to the latest confirmed/refunded payment date."""
+        return OrderPayment.objects.filter(
+            order=outer_ref,
+            state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED),
+            payment_date__isnull=False
+        ).values('order').annotate(
+            m=Max('payment_date')
+        ).values('m').order_by()
+
+    @staticmethod
+    def _date_range(ordered_by_day, paid_by_day=None):
+        """Compute the (start, end) date-range for a daily rrule."""
+        if not ordered_by_day:
+            return datetime.date.today(), datetime.date.today()
+        start = min(ordered_by_day.keys())
+        end_candidates = [
+            max(ordered_by_day.keys() if paid_by_day else [datetime.date.today()]),
+        ]
+        if paid_by_day:
+            end_candidates.append(max(paid_by_day.keys()))
+        else:
+            end_candidates.append(datetime.date(1970, 1, 1))
+        return start, max(end_candidates)
+
+    # ------------------------------------------------------------------
+    # Chart builders — each handles cache-check → query → transform → set
+    # ------------------------------------------------------------------
+
+    def _build_orders_by_day_data(self, ctx, cache, ckey, subevent, tz, p_date):
+        """Orders-by-day bar chart."""
+        ctx['obd_data'] = cache.get('statistics_obd_data' + ckey)
+        if ctx['obd_data']:
+            return
+
+        oqs = Order.objects.annotate(payment_date=Subquery(p_date, output_field=DateTimeField()))
+        if subevent:
+            oqs = oqs.filter(all_positions__subevent_id=subevent, all_positions__canceled=False).distinct()
+
+        ordered_by_day = {}
+        for o in oqs.filter(event=self.request.event).values('datetime'):
+            day = o['datetime'].astimezone(tz).date()
+            ordered_by_day[day] = ordered_by_day.get(day, 0) + 1
+
+        paid_by_day = {}
+        for o in oqs.filter(
+            event=self.request.event, payment_date__isnull=False,
+            status=Order.STATUS_PAID, all_positions__canceled=False
+        ).distinct().values('payment_date'):
+            day = o['payment_date'].astimezone(tz).date()
+            paid_by_day[day] = paid_by_day.get(day, 0) + 1
+
+        start, end = self._date_range(ordered_by_day, paid_by_day)
+        data = []
+        for d in dateutil.rrule.rrule(dateutil.rrule.DAILY, dtstart=start, until=end):
+            d = d.date()
+            data.append({
+                'date': d.strftime('%Y-%m-%d'),
+                'ordered': ordered_by_day.get(d, 0),
+                'paid': paid_by_day.get(d, 0)
+            })
+
+        ctx['obd_data'] = json.dumps(data)
+        cache.set('statistics_obd_data' + ckey, ctx['obd_data'])
+
+    def _build_attendees_by_day_data(self, ctx, cache, ckey, subevent, tz, op_date):
+        """Attendees-by-day + cumulative-over-time charts."""
+        ctx['abd_data'] = cache.get('statistics_abd_data' + ckey)
+        ctx['abt_data'] = cache.get('statistics_abt_data' + ckey)
+        if ctx['abd_data'] and ctx['abt_data']:
+            return
+
+        opqs = OrderPosition.all.filter(order__event=self.request.event, item__admission=True).annotate(
+            payment_date=Subquery(op_date, output_field=DateTimeField())
+        )
+        if subevent:
+            opqs = opqs.filter(subevent=subevent)
+
+        ordered_by_day = {}
+        for p in opqs.values('order__datetime'):
+            day = p['order__datetime'].astimezone(tz).date()
+            ordered_by_day[day] = ordered_by_day.get(day, 0) + 1
+
+        paid_by_day = {}
+        for p in opqs.filter(payment_date__isnull=False, canceled=False, order__status=Order.STATUS_PAID).values('payment_date'):
+            day = p['payment_date'].astimezone(tz).date()
+            paid_by_day[day] = paid_by_day.get(day, 0) + 1
+
+        start, end = self._date_range(ordered_by_day, paid_by_day)
+        day_data = []
+        time_data = []
+        for d in dateutil.rrule.rrule(dateutil.rrule.DAILY, dtstart=start, until=end):
+            d = d.date()
+            day_data.append({
+                'date': d.strftime('%Y-%m-%d'),
+                'ordered': ordered_by_day.get(d, 0),
+                'paid': paid_by_day.get(d, 0)
+            })
+            time_data.append({
+                'date': d.strftime('%Y-%m-%d'),
+                'ordered': (time_data[-1]["ordered"] if time_data else 0) + ordered_by_day.get(d, 0),
+                'paid': (time_data[-1]["paid"] if time_data else 0) + paid_by_day.get(d, 0)
+            })
+
+        ctx['abd_data'] = json.dumps(day_data)
+        ctx['abt_data'] = json.dumps(time_data)
+        cache.set('statistics_abd_data' + ckey, ctx['abd_data'])
+        cache.set('statistics_abt_data' + ckey, ctx['abt_data'])
+
+    def _build_orders_by_product_data(self, ctx, cache, ckey, subevent):
+        """Orders-by-product bar chart."""
+        ctx['obp_data'] = cache.get('statistics_obp_data' + ckey)
+        if ctx['obp_data']:
+            return
+
+        opqs = OrderPosition.all
+        if subevent:
+            opqs = opqs.filter(subevent=subevent)
+        num_ordered = {
+            p['item']: p['cnt']
+            for p in (opqs
+                      .filter(order__event=self.request.event)
+                      .values('item')
+                      .annotate(cnt=Count('id')).order_by())
+        }
+        num_paid = {
+            p['item']: p['cnt']
+            for p in (opqs
+                      .filter(order__event=self.request.event, order__status=Order.STATUS_PAID, canceled=False)
+                      .values('item')
+                      .annotate(cnt=Count('id')).order_by())
+        }
+        item_names = {
+            i.id: str(i)
+            for i in Item.objects.filter(event=self.request.event)
+        }
+        ctx['obp_data'] = json.dumps([
+            {
+                'item': item_names[item],
+                'item_short': item_names[item] if len(item_names[item]) < 15 else (item_names[item][:15] + "\u2026"),
+                'ordered': cnt,
+                'paid': num_paid.get(item, 0)
+            } for item, cnt in num_ordered.items()
+        ])
+        cache.set('statistics_obp_data' + ckey, ctx['obp_data'])
+
+    def _build_revenue_data(self, ctx, cache, ckey, subevent, tz, p_date, op_date):
+        """Cumulative revenue chart."""
+        ctx['rev_data'] = cache.get('statistics_rev_data' + ckey)
+        if ctx['rev_data']:
+            return
+
+        rev_by_day = {}
+        if subevent:
+            for o in OrderPosition.objects.annotate(
+                    payment_date=Subquery(op_date, output_field=DateTimeField())
+            ).filter(order__event=self.request.event,
+                     subevent=subevent,
+                     order__status=Order.STATUS_PAID,
+                     payment_date__isnull=False).values('payment_date', 'price'):
+                day = o['payment_date'].astimezone(tz).date()
+                rev_by_day[day] = rev_by_day.get(day, 0) + o['price']
+        else:
+            for o in Order.objects.annotate(
+                    payment_date=Subquery(p_date, output_field=DateTimeField())
+            ).filter(event=self.request.event,
+                     status=Order.STATUS_PAID,
+                     payment_date__isnull=False).values('payment_date', 'total'):
+                day = o['payment_date'].astimezone(tz).date()
+                rev_by_day[day] = rev_by_day.get(day, 0) + o['total']
+
+        data = []
+        total = 0
+        start = min(rev_by_day.keys()) if rev_by_day else datetime.date.today()
+        end = max(rev_by_day.keys()) if rev_by_day else datetime.date.today()
+        for d in dateutil.rrule.rrule(dateutil.rrule.DAILY, dtstart=start, until=end):
+            d = d.date()
+            total += float(rev_by_day.get(d, 0))
+            data.append({
+                'date': d.strftime('%Y-%m-%d'),
+                'revenue': round(total, 2),
+            })
+        ctx['rev_data'] = json.dumps(data)
+        cache.set('statistics_rev_data' + ckey, ctx['rev_data'])
+
+    def _build_seats_data(self, ctx, ckey, subevent):
+        """Seating plan statistics (only for single-event or specific subevent)."""
+        if self.request.event.has_subevents and not (ckey != "all" and subevent):
+            return
+
+        ev = subevent or self.request.event
+        if ev.seating_plan_id is None:
+            return
+
+        seats_qs = ev.free_seats(sales_channel=None, include_blocked=True)
+        ctx['seats']['blocked_seats'] = seats_qs.filter(blocked=True).count()
+        ctx['seats']['free_seats'] = seats_qs.filter(blocked=False).count()
+        ctx['seats']['purchased_seats'] = \
+            ev.seats.count() - ctx['seats']['blocked_seats'] - ctx['seats']['free_seats']
+
+        seats_qs = seats_qs.values('product', 'blocked').annotate(count=Count('id'))\
+            .order_by('product__category__position', 'product__position', 'product', 'blocked')
+
+        ctx['seats']['products'] = {}
+        ctx['seats']['stats'] = {}
+        item_cache = {i.pk: i for i in
+                      self.request.event.items.annotate(has_variations=Count('variations')).filter(
+                          pk__in={p['product'] for p in seats_qs if p['product']}
+                      )}
+        item_cache[None] = None
+
+        for item in seats_qs:
+            product = item_cache[item['product']]
+            if product not in ctx['seats']['products']:
+                price = self._resolve_seat_price(product)
+                ctx['seats']['products'][product] = {
+                    'free': {'seats': 0, 'potential': Decimal('0.00')},
+                    'blocked': {'seats': 0, 'potential': Decimal('0.00')},
+                    'price': price,
+                }
+            data = ctx['seats']['products'][product]
+
+            if item['blocked']:
+                data['blocked']['seats'] = item['count']
+                data['blocked']['potential'] = item['count'] * data['price']
+            else:
+                data['free']['seats'] = item['count']
+                data['free']['potential'] = item['count'] * data['price']
+
+    @staticmethod
+    def _resolve_seat_price(product):
+        """Determine the display price for a seat product."""
+        price = None
+        if product and product.has_variations:
+            price = product.variations.filter(
+                active=True
+            ).aggregate(Min('default_price'))['default_price__min']
+        if product and not price:
+            price = product.default_price
+        if not price:
+            price = Decimal('0.00')
+        return price

@@ -1,0 +1,18 @@
+{% extends "pretixpresale/event/base.html" %}
+{% load i18n %}
+{% load l10n %}
+{% load money %}
+{% load eventurl %}
+{% load eventsignal %}
+{% load thumb %}
+{% load rich_text %}
+{% block title %}{% trans "Voucher redemption" %}{% endblock %}
+
+{% block content %}
+    {% if show_cart %}
+        {% include "pretixpresale/event/fragment_cart_box.html" with open=request.GET.show_cart %}
+    {% endif %}
+
+    <h2>{% trans "Redeem a voucher" %}</h2>
+    {% include "pretixpresale/event/fragment_voucher_form.html" with next_url=request.path|add:"?show_cart=true" %}
+{% endblock %}

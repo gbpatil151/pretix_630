@@ -1,0 +1,68 @@
+{% load html_time %}
+{% load i18n %}
+{% load icon %}
+{% load eventurl %}
+{% if ev.location and show_location %}
+    <div class="info-row">
+        <div class="info-row-icon" role="img" aria-label="{% trans "Where does the event happen?" %}">
+            {% icon "map-marker" %}
+        </div>
+        <p>
+            {{ ev.location|linebreaksbr }}
+        </p>
+    </div>
+{% endif %}
+{% if ev.settings.show_dates_on_frontpage %}
+    <div class="info-row">
+        <div class="info-row-icon" role="img" aria-label="{% trans "When does the event happen?" %}">
+            {% icon "clock-o" %}
+        </div>
+        <p>
+            {{ ev.get_date_range_display_as_html }}
+            {% if event.settings.show_times %}
+                <br>
+                <span data-time="{{ ev.date_from.isoformat }}" data-timezone="{{ request.event.timezone }}">
+                    {% html_time ev.date_from "TIME_FORMAT" attr_fmt="H:i" as time%}
+                    {% blocktrans trimmed with time=time %}
+                        Begin: {{ time }}
+                    {% endblocktrans %}
+                </span>
+                {% if event.settings.show_date_to and ev.date_to %}
+                    <br>
+                    <span data-time="{{ ev.date_to.isoformat }}" data-timezone="{{ request.event.timezone }}">
+                        {% html_time ev.date_to "TIME_FORMAT" attr_fmt="H:i" as time%}
+                        {% blocktrans trimmed with time=time %}
+                            End: {{ time }}
+                        {% endblocktrans %}
+                    </span>
+                {% endif %}
+            {% endif %}
+            {% if ev.date_admission %}
+                <br>
+                {% if ev.date_admission|date:"SHORT_DATE_FORMAT" == ev.date_from|date:"SHORT_DATE_FORMAT" %}
+                    <span data-time="{{ ev.date_admission.isoformat }}" data-timezone="{{ request.event.timezone }}">
+                        {% html_time ev.date_admission "TIME_FORMAT" attr_fmt="H:i" as time%}
+                        {% blocktrans trimmed with time=time %}
+                            Admission: {{ time }}
+                        {% endblocktrans %}
+                    </span>
+                {% else %}
+                    <span data-time="{{ ev.date_admission.isoformat }}" data-timezone="{{ request.event.timezone }}">
+                        {% html_time ev.date_admission "SHORT_DATETIME_FORMAT" attr_fmt="Y-m-d H:i" as datetime%}
+                        {% blocktrans trimmed with datetime=datetime %}
+                            Admission: {{ datetime }}
+                        {% endblocktrans %}
+                    </span>
+                {% endif %}
+            {% endif %}
+            <br>
+            {% if subevent %}
+                <a href="{% eventurl event "presale:event.ical.download" subevent=subevent.pk %}">
+            {% else %}
+                <a href="{% eventurl event "presale:event.ical.download" %}">
+            {% endif %}
+            {% trans "Add to Calendar" %}
+            </a>
+        </p>
+    </div>
+{% endif %}

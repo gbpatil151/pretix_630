@@ -1,0 +1,113 @@
+{% extends "pretixcontrol/base.html" %}
+{% load i18n %}
+{% load bootstrap3 %}
+{% block title %}{% trans "Account settings" %}{% endblock %}
+{% block content %}
+{% if not user.is_verified %}
+    <div class="alert alert-info">
+        <p>
+            {% blocktrans trimmed %}
+            Your email address is not confirmed yet. To secure your account, please confirm your email address using
+            a confirmation code we will send to your email address.
+            {% endblocktrans %}
+        </p>
+        <p>
+            <form action="{% url "control:user.settings.email.send_verification_code" %}" method="post" class="form-horizontal">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">
+                    {% trans "Send confirmation email" %}
+                </button>
+            </form>
+        </p>
+    </div>
+{% endif %}
+<h1>{% trans "Account settings" %}</h1>
+<form action="" method="post" class="form-horizontal" data-testid="usersettingsform">
+    {% csrf_token %}
+    {% bootstrap_form_errors form %}
+    <fieldset>
+        <legend>{% trans "General settings" %}</legend>
+        {% bootstrap_field form.fullname layout='horizontal' %}
+        {% bootstrap_field form.locale layout='horizontal' %}
+        {% bootstrap_field form.timezone layout='horizontal' %}
+        <div class="form-group">
+            <label class="col-md-3 control-label">{% trans "Notifications" %}</label>
+            <div class="col-md-9 static-form-row">
+                {% if request.user.notifications_send and request.user.notification_settings.exists %}
+                    <span class="label label-success">
+                        <span class="fa fa-bell-o"></span> {% trans "On" %}
+                    </span>
+                {% else %}
+                    <span class="label label-warning">
+                        <span class="fa fa-bell-slash-o"></span> {% trans "Off" %}
+                    </span>
+                {% endif %}
+                &nbsp;
+                <a href="{% url "control:user.settings.notifications" %}">
+                    {% trans "Change notification settings" %}
+                </a>
+            </div>
+        </div>
+    </fieldset>
+    <fieldset>
+        <legend>{% trans "Login settings" %}</legend>
+        {% if form.old_pw %}
+            {% bootstrap_field form.old_pw layout='horizontal' %}
+        {% endif %}
+        {% bootstrap_field form.email layout='horizontal' %}
+        {% if form.new_pw %}
+            {% bootstrap_field form.new_pw layout='horizontal' %}
+            {% bootstrap_field form.new_pw_repeat layout='horizontal' %}
+        {% endif %}
+        {% if user.auth_backend == 'native' %}
+            <div class="form-group">
+                <label class="col-md-3 control-label">{% trans "Password" %}</label>
+                <div class="col-md-9 static-form-row">
+                    <a href="{% url "control:user.settings.password.change" %}">
+                        <span class="fa fa-edit"></span> {% trans "Change password" %}
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+        <div class="form-group">
+            <label class="col-md-3 control-label">{% trans "Two-factor authentication" %}</label>
+            <div class="col-md-9 static-form-row">
+                {% if user.require_2fa %}
+                    <span class="label label-success">{% trans "Enabled" %}</span> &nbsp;
+                    <a href="{% url "control:user.settings.2fa" %}">
+                        {% trans "Change two-factor settings" %}
+                    </a>
+                {% else %}
+                    <span class="label label-default">{% trans "Disabled" %}</span> &nbsp;
+                    <a href="{% url "control:user.settings.2fa" %}">
+                        {% trans "Enable" %}
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="col-md-3 control-label">{% trans "Authorized applications" %}</label>
+            <div class="col-md-9 static-form-row">
+                <a href="{% url "control:user.settings.oauth.list" %}">
+                    <span class="fa fa-plug"></span>
+                    {% trans "Show applications" %}
+                </a>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="col-md-3 control-label">{% trans "Account history" %}</label>
+            <div class="col-md-9 static-form-row">
+                <a href="{% url "control:user.settings.history" %}">
+                    <span class="fa fa-history"></span>
+                    {% trans "Show account history" %}
+                </a>
+            </div>
+        </div>
+    </fieldset>
+    <div class="form-group submit-group">
+        <button type="submit" class="btn btn-primary btn-save">
+            {% trans "Save" %}
+        </button>
+    </div>
+</form>
+{% endblock %}

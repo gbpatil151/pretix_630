@@ -1,0 +1,46 @@
+tests:
+    image:
+        name: pretix/ci-image
+    stage: test
+    before_script:
+        - pip install -U pip uv
+        - uv pip install --system -U wheel setuptools
+    script:
+        - uv pip install --system -e ".[dev]"
+        - cd src
+        - python manage.py check
+        - make all compress
+        - PRETIX_CONFIG_FILE=tests/ci_sqlite.cfg py.test -n 3 tests --maxfail=100
+    except:
+        - pypi
+pypi:
+    stage: release
+    image:
+        name: pretix/ci-image
+    before_script:
+        - cat $PYPIRC > ~/.pypirc
+        - pip install -U pip uv
+        - uv pip install --system -U wheel setuptools twine build pretix-plugin-build check-manifest
+    script:
+        - uv pip install --system -e ".[dev]"
+        - python setup.py sdist
+        - uv pip install --system dist/pretix-*.tar.gz
+        - python -m pretix migrate
+        - python -m pretix check
+        - cd src
+        - make npminstall
+        - cd ..
+        - check-manifest
+        - python -m build
+        - twine check dist/*
+        - twine upload dist/*
+    only:
+        - pypi
+    artifacts:
+        paths:
+            - src/dist/
+
+stages:
+    - test
+    - build
+    - release

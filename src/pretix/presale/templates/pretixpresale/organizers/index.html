@@ -1,0 +1,112 @@
+{% extends "pretixpresale/organizers/base.html" %}
+{% load i18n %}
+{% load date_fast %}
+{% load icon %}
+{% load rich_text %}
+{% load tz %}
+{% load eventurl %}
+{% load urlreplace %}
+{% load textbubble %}
+{% load thumb %}
+{% block title %}{% trans "Event list" %}{% endblock %}
+{% block custom_header %}
+    {{ block.super }}
+    <meta property="og:title" content="{{ organizer.name }}"/>
+    {% if organizer_logo %}
+        <meta property="og:image" content="{{ organizer_logo|thumb:'5000x120' }}"/>
+    {% endif %}
+    <meta property="og:type" content="website"/>
+    <meta property="og:url" content="{% abseventurl organizer "presale:organizer.index" %}"/>
+{% endblock %}
+{% block content %}
+    {% if organizer_homepage_text %}
+        <div class="blank-after">
+            {{ organizer_homepage_text | rich_text }}
+        </div>
+    {% endif %}
+    <div class="blank-after text-left flip">
+        {% include "pretixpresale/fragment_calendar_nav.html" with date=date request=request style="list" %}
+    </div>
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h2 class="panel-title">
+                <strong>
+                {% if "old" in request.GET %}
+                    {% trans "Past events" %}
+                {% else %}
+                    {% trans "Upcoming events" %}
+                {% endif %}
+                </strong>
+            </h2>
+        </div>
+    {% if filter_form.fields %}
+        <div class="panel-subhead">
+            {% include "pretixpresale/fragment_event_list_filter.html" with request=request %}
+        </div>
+    {% endif %}
+        {% if events %}
+            <div class="panel-body">
+                <div class="event-list full-width-list alternating-rows">
+                {% for e in events %}{% eventurl e "presale:event.index" as url %}
+                    <article class="row" aria-labelledby="event-{{ e.pk }}-label" aria-describedby="event-{{ e.pk }}-desc">
+                        <h3 class="col-md-4 col-xs-12"><a href="{{ url }}" id="event-{{ e.pk }}-label" class="no-underline">{{ e.name }}</a></h3>
+                        <p class="col-md-3 col-xs-12{% if e.is_remote%} event-is-remote{% endif %}" id="event-{{ e.pk }}-desc">
+                        {% if e.settings.show_dates_on_frontpage %}
+                            {% if e.has_subevents %}
+                                {% icon "calendar" %} {% trans "Multiple dates" context "subevent" %}
+                                <br>
+                                <span class="text-muted">
+                                   {{ e.daterange|default:e.get_date_range_display_as_html }}
+                                </span>
+                            {% else %}
+                                {{ e.daterange|default:e.get_date_range_display_as_html }}
+                                {% if e.settings.show_times %}
+                                    {% timezone e.tzname %}
+                                        <br>
+                                        <span class="text-muted" data-time="{{ e.date_from.isoformat }}" data-timezone="{{ e.tzname }}">
+                                            {% icon "clock-o" %}
+                                            <span class="sr-only">{% trans "Time of day" %}</span>
+                                            <time datetime="{{ e.date_from|date_fast:"H:i" }}">{{ e.date_from|date:"TIME_FORMAT" }}</time>
+                                            {% if e.settings.show_date_to and e.date_to and e.date_to.date == e.date_from.date %}
+                                                <span aria-hidden="true">–</span><span class="sr-only">{% trans "until" context "timerange" %}</span>
+                                                <time datetime="{{ e.date_to|date_fast:"H:i" }}">{{ e.date_to|date:"TIME_FORMAT" }}</time>
+                                            {% endif %}
+                                        </span>
+                                    {% endtimezone %}
+                                {% endif %}
+                            {% endif %}
+                        {% else %}
+                            &nbsp;
+                        {% endif %}
+                        </p>
+                        <p class="col-md-3 col-xs-6">
+                            <small>
+                                {% include "pretixpresale/fragment_event_list_status.html" with event=e %}
+                            </small>
+                        </p>
+                        <p class="col-md-2 col-xs-6 text-right flip">
+                            <a class="btn btn-primary btn-block" href="{{ url }}{% if e.has_subevents and e.match_by_subevents %}{{ filterquery }}{% endif %}">
+                                {% if e.has_subevents %}{% icon "ticket" %} {% trans "Tickets" %}
+                                {% elif e.presale_is_running and e.best_availability_state == 100 %}
+                                    {% icon "ticket" %} {% trans "Tickets" %}
+                                {% else %}
+                                    {% icon "info" %} {% trans "More info" %}
+                                {% endif %}
+                            </a>
+                        </p>
+                    </article>
+                {% endfor %}
+                </div>
+            </div>
+            <hr>
+        {% endif %}
+        <div class="panel-body">
+            {% if "old" in request.GET %}
+                <p><em>{% if not events %}{% trans "No archived events found." %} {% endif %}<a href="?{% url_replace request "old" "" %}">{% trans "Show upcoming" %}</a></em></p>
+            {% else %}
+                <p><em>{% if not events %}{% trans "No public upcoming events found." %} {% endif %}<a href="?{% url_replace request "old" "1" %}">{% trans "Show past events" %}</a></em></p>
+            {% endif %}
+        </div>
+    </div>
+    {% include "pretixpresale/pagination.html" %}
+{% endblock %}

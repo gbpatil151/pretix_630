@@ -1,0 +1,41 @@
+{% load i18n %}
+{% load l10n %}
+{% load commadecimal %}
+{% load dotdecimal %}
+{% load ibanformat %}
+{% load money %}
+{% load unidecode %}
+{% load rich_text %}
+{% load eventurl %}
+
+{% if pending_description %}
+    {{ pending_description|rich_text }}
+{% endif %}
+<p>{% blocktrans trimmed %}
+    Please transfer the full amount to the following bank account:
+{% endblocktrans %}</p>
+
+<div class="row">
+    <div class="{% if payment_qr_codes %}col-md-6{% else %}col-md-12{% endif %} col-xs-12">
+        <dl class="dl-horizontal">
+            <dt>{% trans "Reference code (important):" %}</dt><dd><b>{{ code }}</b></dd>
+            <dt>{% trans "Amount:" %}</dt><dd>{{ amount|money:event.currency }}</dd>
+            {% if settings.bank_details_type == "sepa" %}
+                <dt>{% trans "Account holder" %}:</dt><dd>{{ settings.bank_details_sepa_name }}</dd>
+                <dt>{% trans "IBAN" %}:</dt><dd>{{ settings.bank_details_sepa_iban|ibanformat }}</dd>
+                <dt>{% trans "BIC" %}:</dt><dd>{{ settings.bank_details_sepa_bic }}</dd>
+                <dt>{% trans "Bank" %}:</dt><dd>{{ settings.bank_details_sepa_bank }}</dd>
+            {% endif %}
+        </dl>
+        {% if details %}
+            {{ details | rich_text }}
+        {% endif %}
+        <p class="text-muted">
+            {% trans "There is no further action required on this website." %}
+            {% trans "We will send you an email as soon as we received your payment." %}
+        </p>
+    </div>
+    {% if payment_qr_codes %}
+        {% include "pretixpresale/event/payment_qr_codes.html" %}
+    {% endif %}
+</div>

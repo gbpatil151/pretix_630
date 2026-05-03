@@ -1,0 +1,110 @@
+date,issue_id,issue_title,person,activity,minutes,notes,pr_link
+2026-03-15,26,Extract _perform_operations helpers,Aditya Raut,triage,30,Reviewed sonar issue and located file,
+2026-03-15,26,Extract _perform_operations helpers,Aditya Raut,plan,15,Decided on helper extraction approach,
+2026-03-16,26,Extract _perform_operations helpers,Aditya Raut,implement,90,Applied refactoring avoiding churn,
+2026-03-16,26,Extract _perform_operations helpers,Aditya Raut,verify,45,Ran test suite and manual verification,
+2026-03-16,26,Extract _perform_operations helpers,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/49
+2026-03-16,26,Extract _perform_operations helpers,Gaurav Patil,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/49
+2026-03-16,26,Extract _perform_operations helpers,Aditya Raut,rework,30,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/49
+2026-03-16,27,Extract _cancel_order sub-steps,Aditya Raut,triage,15,Reviewed sonar issue and located file,
+2026-03-16,27,Extract _cancel_order sub-steps,Aditya Raut,plan,15,Decided on helper extraction approach,
+2026-03-17,27,Extract _cancel_order sub-steps,Aditya Raut,implement,90,Applied refactoring avoiding churn,
+2026-03-17,27,Extract _cancel_order sub-steps,Aditya Raut,verify,15,Ran test suite and manual verification,
+2026-03-17,27,Extract _cancel_order sub-steps,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/46
+2026-03-18,27,Extract _cancel_order sub-steps,Gaurav Patil,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/46
+2026-03-18,27,Extract _cancel_order sub-steps,Aditya Raut,rework,15,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/46
+2026-03-19,28,Extract build_invoice construction phases,Aditya Raut,triage,30,Reviewed sonar issue and located file,
+2026-03-19,28,Extract build_invoice construction phases,Aditya Raut,plan,30,Decided on helper extraction approach,
+2026-03-19,28,Extract build_invoice construction phases,Aditya Raut,implement,45,Applied refactoring avoiding churn,
+2026-03-19,28,Extract build_invoice construction phases,Aditya Raut,verify,15,Ran test suite and manual verification,
+2026-03-19,28,Extract build_invoice construction phases,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/44
+2026-03-19,28,Extract build_invoice construction phases,Gaurav Patil,review,30,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/44
+2026-03-19,28,Extract build_invoice construction phases,Aditya Raut,rework,30,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/44
+2026-03-20,29,Deduplicate gift card reversal logic,Aditya Raut,triage,15,Reviewed sonar issue and located file,
+2026-03-20,29,Deduplicate gift card reversal logic,Aditya Raut,plan,30,Decided on helper extraction approach,
+2026-03-21,29,Deduplicate gift card reversal logic,Aditya Raut,implement,75,Applied refactoring avoiding churn,
+2026-03-21,29,Deduplicate gift card reversal logic,Aditya Raut,verify,45,Ran test suite and manual verification,
+2026-03-21,29,Deduplicate gift card reversal logic,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/43
+2026-03-21,29,Deduplicate gift card reversal logic,Gaurav Patil,review,30,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/43
+2026-03-21,29,Deduplicate gift card reversal logic,Aditya Raut,rework,30,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/43
+2026-03-22,30,Reduce parameter count _cancel_order,Aditya Raut,triage,30,Reviewed sonar issue and located file,
+2026-03-22,30,Reduce parameter count _cancel_order,Aditya Raut,plan,15,Decided on helper extraction approach,
+2026-03-23,30,Reduce parameter count _cancel_order,Aditya Raut,implement,60,Applied refactoring avoiding churn,
+2026-03-23,30,Reduce parameter count _cancel_order,Aditya Raut,verify,30,Ran test suite and manual verification,
+2026-03-23,30,Reduce parameter count _cancel_order,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/47
+2026-03-24,30,Reduce parameter count _cancel_order,Gaurav Patil,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/47
+2026-03-24,30,Reduce parameter count _cancel_order,Aditya Raut,rework,15,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/47
+2026-03-24,31,Split settings god module,Aditya Raut,triage,15,Reviewed sonar issue and located file,
+2026-03-24,31,Split settings god module,Aditya Raut,plan,15,Decided on helper extraction approach,
+2026-03-24,31,Split settings god module,Aditya Raut,implement,105,Applied refactoring avoiding churn,
+2026-03-24,31,Split settings god module,Aditya Raut,verify,30,Ran test suite and manual verification,
+2026-03-24,31,Split settings god module,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/48
+2026-03-24,31,Split settings god module,Gaurav Patil,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/48
+2026-03-24,31,Split settings god module,Aditya Raut,rework,30,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/48
+2026-03-24,32,Deduplicate voucher budget_use calculation,Aditya Raut,triage,30,Reviewed sonar issue and located file,
+2026-03-24,32,Deduplicate voucher budget_use calculation,Aditya Raut,plan,15,Decided on helper extraction approach,
+2026-03-25,32,Deduplicate voucher budget_use calculation,Aditya Raut,implement,75,Applied refactoring avoiding churn,
+2026-03-25,32,Deduplicate voucher budget_use calculation,Aditya Raut,verify,30,Ran test suite and manual verification,
+2026-03-25,32,Deduplicate voucher budget_use calculation,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/42
+2026-03-25,32,Deduplicate voucher budget_use calculation,Gaurav Patil,review,15,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/42
+2026-03-25,33,Reduce cognitive complexity _check_positions,Aditya Raut,triage,30,Reviewed sonar issue and located file,
+2026-03-25,33,Reduce cognitive complexity _check_positions,Aditya Raut,plan,15,Decided on helper extraction approach,
+2026-03-26,33,Reduce cognitive complexity _check_positions,Aditya Raut,implement,90,Applied refactoring avoiding churn,
+2026-03-26,33,Reduce cognitive complexity _check_positions,Aditya Raut,verify,30,Ran test suite and manual verification,
+2026-03-26,33,Reduce cognitive complexity _check_positions,Aditya Raut,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/45
+2026-03-27,33,Reduce cognitive complexity _check_positions,Gaurav Patil,review,15,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/45
+2026-03-27,33,Reduce cognitive complexity _check_positions,Aditya Raut,rework,30,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/45
+2026-03-27,34,Split orderlist render into phases,Gaurav Patil,triage,30,Reviewed sonar issue and located file,
+2026-03-27,34,Split orderlist render into phases,Gaurav Patil,plan,15,Decided on helper extraction approach,
+2026-03-28,34,Split orderlist render into phases,Gaurav Patil,implement,75,Applied refactoring avoiding churn,
+2026-03-28,34,Split orderlist render into phases,Gaurav Patil,verify,45,Ran test suite and manual verification,
+2026-03-28,34,Split orderlist render into phases,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/58
+2026-03-28,34,Split orderlist render into phases,Aditya Raut,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/58
+2026-03-28,34,Split orderlist render into phases,Gaurav Patil,rework,15,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/58
+2026-03-28,35,Reduce checkinlist exporter get_data complexity,Gaurav Patil,triage,15,Reviewed sonar issue and located file,
+2026-03-28,35,Reduce checkinlist exporter get_data complexity,Gaurav Patil,plan,15,Decided on helper extraction approach,
+2026-03-28,35,Reduce checkinlist exporter get_data complexity,Gaurav Patil,implement,105,Applied refactoring avoiding churn,
+2026-03-28,35,Reduce checkinlist exporter get_data complexity,Gaurav Patil,verify,30,Ran test suite and manual verification,
+2026-03-28,35,Reduce checkinlist exporter get_data complexity,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/59
+2026-03-28,35,Reduce checkinlist exporter get_data complexity,Aditya Raut,review,15,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/59
+2026-03-28,36,Reduce checkin redeem_process complexity,Gaurav Patil,triage,15,Reviewed sonar issue and located file,
+2026-03-28,36,Reduce checkin redeem_process complexity,Gaurav Patil,plan,15,Decided on helper extraction approach,
+2026-03-28,36,Reduce checkin redeem_process complexity,Gaurav Patil,implement,75,Applied refactoring avoiding churn,
+2026-03-28,36,Reduce checkin redeem_process complexity,Gaurav Patil,verify,15,Ran test suite and manual verification,
+2026-03-28,36,Reduce checkin redeem_process complexity,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/57
+2026-03-28,36,Reduce checkin redeem_process complexity,Aditya Raut,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/57
+2026-03-28,37,Reduce mail long parameter list,Gaurav Patil,triage,30,Reviewed sonar issue and located file,
+2026-03-28,37,Reduce mail long parameter list,Gaurav Patil,plan,30,Decided on helper extraction approach,
+2026-03-28,37,Reduce mail long parameter list,Gaurav Patil,implement,60,Applied refactoring avoiding churn,
+2026-03-28,37,Reduce mail long parameter list,Gaurav Patil,verify,30,Ran test suite and manual verification,
+2026-03-28,37,Reduce mail long parameter list,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/54
+2026-03-28,37,Reduce mail long parameter list,Aditya Raut,review,15,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/54
+2026-03-28,37,Reduce mail long parameter list,Gaurav Patil,rework,15,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/54
+2026-03-28,38,Reduce statistics chart complexity,Gaurav Patil,triage,30,Reviewed sonar issue and located file,
+2026-03-28,38,Reduce statistics chart complexity,Gaurav Patil,plan,15,Decided on helper extraction approach,
+2026-03-28,38,Reduce statistics chart complexity,Gaurav Patil,implement,45,Applied refactoring avoiding churn,
+2026-03-28,38,Reduce statistics chart complexity,Gaurav Patil,verify,30,Ran test suite and manual verification,
+2026-03-28,38,Reduce statistics chart complexity,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/53
+2026-03-28,38,Reduce statistics chart complexity,Aditya Raut,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/53
+2026-03-28,38,Reduce statistics chart complexity,Gaurav Patil,rework,30,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/53
+2026-03-28,39,Centralize devicesecurity route constants,Gaurav Patil,triage,30,Reviewed sonar issue and located file,
+2026-03-28,39,Centralize devicesecurity route constants,Gaurav Patil,plan,30,Decided on helper extraction approach,
+2026-03-28,39,Centralize devicesecurity route constants,Gaurav Patil,implement,45,Applied refactoring avoiding churn,
+2026-03-28,39,Centralize devicesecurity route constants,Gaurav Patil,verify,15,Ran test suite and manual verification,
+2026-03-28,39,Centralize devicesecurity route constants,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/52
+2026-03-28,39,Centralize devicesecurity route constants,Aditya Raut,review,30,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/52
+2026-03-28,39,Centralize devicesecurity route constants,Gaurav Patil,rework,30,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/52
+2026-03-28,40,OrderSerializer nested conditionals,Gaurav Patil,triage,30,Reviewed sonar issue and located file,
+2026-03-28,40,OrderSerializer nested conditionals,Gaurav Patil,plan,30,Decided on helper extraction approach,
+2026-03-28,40,OrderSerializer nested conditionals,Gaurav Patil,implement,45,Applied refactoring avoiding churn,
+2026-03-28,40,OrderSerializer nested conditionals,Gaurav Patil,verify,30,Ran test suite and manual verification,
+2026-03-28,40,OrderSerializer nested conditionals,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/55
+2026-03-28,40,OrderSerializer nested conditionals,Aditya Raut,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/55
+2026-03-28,40,OrderSerializer nested conditionals,Gaurav Patil,rework,15,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/55
+2026-03-28,41,Order API view complexity,Gaurav Patil,triage,30,Reviewed sonar issue and located file,
+2026-03-28,41,Order API view complexity,Gaurav Patil,plan,15,Decided on helper extraction approach,
+2026-03-28,41,Order API view complexity,Gaurav Patil,implement,45,Applied refactoring avoiding churn,
+2026-03-28,41,Order API view complexity,Gaurav Patil,verify,15,Ran test suite and manual verification,
+2026-03-28,41,Order API view complexity,Gaurav Patil,pr_overhead,15,Drafted PR and mapped to issue,https://github.com/gbpatil151/pretix_630/pull/56
+2026-03-28,41,Order API view complexity,Aditya Raut,review,45,Checked logic for correctness and test coverage,https://github.com/gbpatil151/pretix_630/pull/56
+2026-03-28,41,Order API view complexity,Gaurav Patil,rework,15,Addressed reviewer comments regarding naming,https://github.com/gbpatil151/pretix_630/pull/56

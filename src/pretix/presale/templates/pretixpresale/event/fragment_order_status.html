@@ -1,0 +1,29 @@
+{% load i18n %}
+{% load bootstrap3 %}
+{% load textbubble %}
+{# Changes should be replicated in pretixcontrol/orders/fragment_order_status.html and in pretix/base/models/orders.py #}
+{% if order.status == "n" %}
+    {% if order.require_approval %}
+        {% textbubble "warning" icon="exclamation-triangle" %}{% trans "Approval pending" %}{% endtextbubble %}
+    {% elif order.total == 0 %}
+        {% textbubble "warning" icon="exclamation-triangle" %}{% trans "Confirmation pending" context "order state" %}{% endtextbubble %}
+    {% elif event.settings.payment_pending_hidden %}
+        {# intentionally left blank #}
+    {% elif order.valid_if_pending %}
+        {% textbubble "info" icon="info-circle" %}{% trans "Confirmed" context "order state" %}{% endtextbubble %}
+    {% else %}
+        {% textbubble "warning" icon="exclamation-triangle" %}{% trans "Payment pending" %}{% endtextbubble %}
+    {% endif %}
+{% elif order.status == "p" %}
+    {% if order.count_positions == 0 %}
+        {% textbubble "info" icon="info-circle" %}{% trans "Canceled (paid fee)" %}{% endtextbubble %}
+    {% elif order.total == 0 %}
+        {% textbubble "success" icon="check" %}{% trans "Confirmed" context "order state" %}{% endtextbubble %}
+    {% else %}
+        {% textbubble "success" icon="check" %}{% trans "Paid" %}{% endtextbubble %}
+    {% endif %}
+{% elif order.status == "e" %}
+    {% textbubble "danger" icon="minus" %}{% trans "Expired" %}{% endtextbubble %}
+{% elif order.status == "c" %}
+    {% textbubble "danger" icon="times" %}{% trans "Canceled" %}{% endtextbubble %}
+{% endif %}

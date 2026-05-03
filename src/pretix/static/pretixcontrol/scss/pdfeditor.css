@@ -1,0 +1,105 @@
+#fabric-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+#editor-canvas-area {
+    position: relative;
+    min-height: 250px;
+}
+body {
+    overflow-y: scroll;
+}
+#toolbox .control-group {
+    margin-bottom: 5px;
+}
+#toolbox .position,
+#toolbox .squaresize,
+#toolbox .rectsize,
+#toolbox .poweredby,
+#toolbox[data-type] .pdf-info,
+#toolbox .text,
+#toolbox .textarea,
+#toolbox .textcontainer,
+#toolbox .imagecontent {
+    display: none;
+}
+#toolbox[data-type] .position,
+#toolbox[data-type=barcodearea] .squaresize,
+#toolbox[data-type=barcodearea] .textcontent,
+#toolbox[data-type=imagearea] .rectsize,
+#toolbox[data-type=imagearea] .imagecontent,
+#toolbox[data-type=poweredby] .poweredby,
+#toolbox[data-type=text] .text,
+#toolbox[data-type=text] .textarea,
+#toolbox[data-type=textcontainer] .text,
+#toolbox[data-type=textcontainer] .textcontainer,
+#toolbox[data-type=textcontainer] .rectsize,
+#toolbox[data-type=textarea] .text,
+#toolbox[data-type=textarea] .textarea {
+    display: block;
+}
+#toolbox[data-type=text] .btn-group-justified > .btn-group.text,
+#toolbox[data-type=text] .btn-group-justified > .btn-group.textarea,
+#toolbox[data-type=textcontainer] .btn-group-justified > .btn-group.text,
+#toolbox[data-type=textcontainer] .btn-group-justified > .btn-group.textcontainer,
+#toolbox[data-type=textarea] .btn-group-justified > .btn-group.text,
+#toolbox[data-type=textarea] .btn-group-justified > .btn-group.textarea {
+    display: table-cell;
+}
+#loading-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: white;
+    width: 100%;
+    text-align: center;
+}
+#loading-container > div {
+    max-width: 600px;
+    margin: auto;
+}
+#loading-upload {
+    display: none;
+}
+.preload-font {
+    visibility: hidden;
+}
+#source-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: white;
+    width: 100%;
+    text-align: center;
+}
+#source-container textarea {
+    width: 100%;
+    height: 250px;
+}
+.pdf-info .help-inline p {
+    margin-top: 10px;
+    margin-bottom: 0;
+}
+.panel-pdf-editor .panel-body {
+    padding: 0;
+}
+.panel-pdf-editor .panel-body .nav-pills {
+    padding: 15px;
+    background: #eee;
+}
+.panel-pdf-editor .panel-heading {
+    padding: 4px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.panel-pdf-editor .panel-heading [disabled] {
+    box-shadow: 0px 0px 0px 1px #cccccc inset;
+}
+.panel-pdf-editor .panel-heading > .btn-group,
+.panel-pdf-editor .panel-heading form > .btn-group {
+    margin-right: 1em;
+}

@@ -1,0 +1,103 @@
+{% load compress %}
+{% load static %}
+{% load i18n %}
+{% load safelink %}
+{% load statici18n %}
+{% load thumb %}
+<!DOCTYPE html>
+<html{% if rtl %} dir="rtl" class="rtl"{% endif %} lang="{{ html_locale }}">
+<head>
+    <title>{% block thetitle %}{% endblock %}</title>
+    {% compress css file presale %}
+        <link rel="stylesheet" type="text/x-scss" href="{% static "pretixpresale/scss/main.scss" %}"/>
+    {% endcompress %}
+    {% if css_theme %}
+        <link rel="stylesheet" type="text/css" href="{{ css_theme }}" />
+    {% endif %}
+
+    {% include "pretixpresale/fragment_js.html" %}
+    <meta name="referrer" content="origin">
+    {{ html_head|safe }}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {% block custom_header %}{% endblock %}
+    {% if settings.favicon %}
+        <link rel="icon" href="{{ settings.favicon|thumb:'16x16^' }}">
+        <link rel="shortcut icon" href="{{ settings.favicon|thumb:'16x16^' }}">
+        <link rel="icon" type="image/png" sizes="16x16" href="{{ settings.favicon|thumb:'16x16^' }}">
+        <link rel="icon" type="image/png" sizes="32x32" href="{{ settings.favicon|thumb:'32x32^' }}">
+        <link rel="icon" type="image/png" sizes="192x192" href="{{ settings.favicon|thumb:'192x192^' }}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{{ settings.favicon|thumb:'180x180^' }}">
+    {% elif development_warning or debug_warning %}
+        <link rel="shortcut icon" href="{% static "pretixbase/img/favicon-debug.ico" %}">
+    {% else %}
+        <link rel="icon" href="{% static "pretixbase/img/favicon.ico" %}">
+        <link rel="shortcut icon" href="{% static "pretixbase/img/favicon.ico" %}">
+        <link rel="icon" type="image/png" sizes="16x16" href="{% static "pretixbase/img/icons/favicon-16x16.png" %}">
+        <link rel="icon" type="image/png" sizes="32x32" href="{% static "pretixbase/img/icons/favicon-32x32.png" %}">
+        <link rel="icon" type="image/png" sizes="192x192" href="{% static "pretixbase/img/icons/android-chrome-192x192.png" %}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{% static "pretixbase/img/icons/apple-touch-icon.png" %}">
+    {% endif %}
+    <meta name="theme-color" content="{{ settings.primary_color|default:"#3b1c4a" }}">
+</head>
+<body class="nojs" data-locale="{{ request.LANGUAGE_CODE }}" data-now="{% now "U.u" %}" data-datetimeformat="{{ js_datetime_format }}" data-timeformat="{{ js_time_format }}" data-dateformat="{{ js_date_format }}" data-datetimelocale="{{ js_locale }}" data-currency="{{ request.event.currency }}">
+{{ html_page_header|safe }}
+<nav id="skip-to-main" role="navigation" aria-label="{% trans "Skip link" context "skip-to-main-nav" %}" class="sr-only on-focus-visible">
+  <p><a href="#content">{% trans "Skip to main content" %}</a></p>
+</nav>
+<header>
+{% if ie_deprecation_warning %}
+    <div class="old-browser-warning">
+        <span class="fa fa-internet-explorer"></span>
+        {% blocktrans trimmed %}
+            We've detected that you are using <strong>Microsoft Internet Explorer</strong>.
+        {% endblocktrans %}
+        {% blocktrans trimmed %}
+            Internet Explorer is an old browser that does not support lots of recent web-based
+            technologies and is no longer supported by this website.
+        {% endblocktrans %}
+        {% blocktrans trimmed %}
+            We kindly ask you to move to one of our supported browsers, such as Microsoft Edge,
+            Mozilla Firefox, Google Chrome, or Safari.
+        {% endblocktrans %}
+    </div>
+{% endif %}
+{% block above %}
+{% endblock %}
+</header>
+<div class="container main-box">
+    <main id="content">
+    {% block page %}
+    {% endblock %}
+    </main>
+    <footer>
+        {% block footer %}
+        {% endblock %}
+        <nav aria-label="{% trans "Footer Navigation" %}">
+            <ul>
+            {% block footernav %}
+            {% endblock %}
+            {% if footer_text %}
+                <li>{{ footer_text }}</li>
+            {% endif %}
+            {% for f in footer %}
+                <li><a href="{% safelink f.url %}" target="_blank" rel="noopener">{{ f.label }}</a></li>
+            {% endfor %}
+            {% include "pretixpresale/base_footer.html" %} {# removing or hiding this might be in violation of pretix' license #}
+            </ul>
+        </nav>
+    </footer>
+</div>
+{% include "pretixpresale/fragment_modals.html" %}
+{% if DEBUG %}
+    <script type="text/javascript" src="{% url 'javascript-catalog' lang=request.LANGUAGE_CODE %}"></script>
+{% else %}
+    <script src="{% statici18n request.LANGUAGE_CODE %}"></script>
+{% endif %}
+{% if request.session.iframe_session %}
+    {% compress js file iframeresizer %}
+        <script type="text/javascript" src="{% static "iframeresizer/iframeResizer.contentWindow.js" %}"></script>
+    {% endcompress %}
+{% endif %}
+{{ html_foot|safe }}
+</body>
+</html>

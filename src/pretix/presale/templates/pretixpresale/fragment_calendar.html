@@ -1,0 +1,136 @@
+{% load html_time %}
+{% load i18n %}
+{% load date_fast %}
+{% load calendarhead %}
+<div class="table-responsive">
+    <table class="table table-calendar" role="grid">
+        <caption class="sr-only">{% trans "Calendar" %}</caption>
+        <thead>
+        <tr>
+            {% for d in weeks|iter_weekdays %}
+                <th><span aria-hidden="true" class="text-muted">{{ d|date_fast:"D" }}</span><span class="sr-only">{{ d|date_fast:"l" }}</span></th>
+            {% endfor %}
+        </tr>
+        </thead>
+        <tbody>
+        {% for week in weeks %}
+            <tr>
+                {% for day in week %}
+                    {% if day %}
+                        <td class="day {% if day.events %}has-events{% else %}no-events{% endif %}"
+                            data-date="{{ day.date|date_fast:"SHORT_DATE_FORMAT" }}">
+                            <p>
+                            {% if day.events %}
+                                <a href="#selected-day" class="day-label event hidden-sm hidden-md hidden-lg">
+                                    <b aria-hidden="true">{{ day.day }}</b>
+                                    <time datetime="{{ day.date|date_fast:"Y-m-d" }}" class="sr-only">
+                                        {{ day.date|date_fast:"SHORT_DATE_FORMAT" }}
+                                    </time>
+                                    <span class="sr-only">
+                                        ({% blocktrans trimmed count count=day.events|length %}
+                                            {{ count }} event
+                                        {% plural %}
+                                            {{ count }} events
+                                        {% endblocktrans %})
+                                    </span>
+                                </a>
+                                <time datetime="{{ day.date|date_fast:"Y-m-d" }}" class="hidden-xs">{{ day.day }}</time>
+                            {% else %}
+                                <time datetime="{{ day.date|date_fast:"Y-m-d" }}" class="day-label">{{ day.day }}</time>
+                            {% endif %}
+                            </p>
+                            <ul class="events">
+                                {% for event in day.events %}
+                                    <li><a class="event {% if event.continued %}continued{% endif %} {% spaceless %}
+    {% if event.event.presale_is_running and show_avail %}
+        {% if event.event.best_availability_state == 100 %}
+            available {% if event.event.best_availability_is_low %} low {% endif %}
+        {% elif event.event.waiting_list_active and event.event.best_availability_state >= 0 %}
+            waitinglist
+        {% elif event.event.best_availability_state == 20 %}
+            reserved
+        {% elif event.event.best_availability_state < 20 %}
+            soldout
+        {% endif %}
+    {% elif event.event.presale_is_running %}
+        running
+    {% elif event.event.presale_has_ended %}
+        over
+    {% elif event.event.settings.presale_start_show_date and event.event.effective_presale_start %}
+        soon
+    {% else %}
+        soon
+    {% endif %}
+{% endspaceless %}"
+                                       href="{{ event.url }}">
+                                        {% if show_names|default_if_none:True %}
+                                            <span class="event-name">
+                                                {{ event.event.name }}
+                                                {% if event.continued %} <i class="event-name-continued">{% trans "(continued)" %}</i>{% endif %}
+                                            </span>
+                                        {% endif %}
+                                        {% if not event.continued %}
+                                            {% if event.time %}
+                                                <span class="event-time" data-time="{{ event.event.date_from.isoformat }}" data-timezone="{{ event.timezone }}" data-time-short>
+                                                    <span class="fa fa-clock-o" aria-hidden="true"></span>
+                                                    <time datetime="{{ event.time|date_fast:"H:i" }}">{{ event.time|date_fast:"TIME_FORMAT" }}</time>
+                                                    {% if event.event.settings.show_date_to and event.time_end %}
+                                                        <span aria-hidden="true">–</span><span class="sr-only">{% trans "until" context "timerange" %}</span> <time datetime="{{ event.time_end|date_fast:"H:i" }}">{{ event.time_end|date_fast:"TIME_FORMAT" }}</time>
+                                                    {% endif %}
+                                                    {% if multiple_timezones %}
+                                                        {{ event.timezone }}
+                                                    {% endif %}
+                                                </span>
+                                            {% endif %}
+                                            <span class="event-status">
+                                                {% if event.event.presale_is_running and show_avail %}
+                                                    {% if event.event.best_availability_state == 100 %}
+                                                        {% if event.event.best_availability_is_low %}
+                                                            <span class="fa fa-exclamation-circle" aria-hidden="true"></span> {% trans "Few tickets left" %}
+                                                        {% else %}
+                                                            {% if event.event.has_paid_item %}
+                                                                <span class="fa fa-ticket" aria-hidden="true"></span> {% trans "Buy now" context "available_event_in_list" %}
+                                                            {% else %}
+                                                                <span class="fa fa-ticket" aria-hidden="true"></span> {% trans "Book now" %}
+                                                            {% endif %}
+                                                        {% endif %}
+                                                    {% elif event.event.waiting_list_active and event.event.best_availability_state >= 0 %}
+                                                        <span class="fa fa-ticket" aria-hidden="true"></span> {% trans "Waiting list" %}
+                                                    {% elif event.event.best_availability_state == 20 %}
+                                                        {% trans "Reserved" %}
+                                                    {% elif event.event.best_availability_state < 20 %}
+                                                        {% if event.event.has_paid_item %}
+                                                            {% trans "Sold out" %}
+                                                        {% else %}
+                                                            {% trans "Fully booked" %}
+                                                        {% endif %}
+                                                    {% endif %}
+                                                {% elif event.event.presale_is_running %}
+                                                    <span class="fa fa-ticket" aria-hidden="true"></span> {% trans "Book now" %}
+                                                {% elif event.event.presale_has_ended %}
+                                                    {% trans "Sale over" %}
+                                                {% elif event.event.settings.presale_start_show_date and event.event.effective_presale_start %}
+                                                    <span class="fa fa-ticket" aria-hidden="true"></span>
+                                                    {% html_time event.event.effective_presale_start "SHORT_DATE_FORMAT" as start_date %}
+                                                    {% blocktrans with start_date=start_date %}
+                                                        from {{ start_date }}
+                                                    {% endblocktrans %}
+                                                {% else %}
+                                                    <span class="fa fa-ticket" aria-hidden="true"></span> {% trans "Soon" %}
+                                                {% endif %}
+                                            </span>
+                                        {% endif %}
+                                    </a></li>
+                                {% endfor %}
+                            </ul>
+                        </td>
+                    {% else %}
+                        <td class="no-day"></td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div id="selected-day" aria-live="polite" class="table-calendar hidden-sm hidden-md hidden-lg"></div>
+</div>

@@ -1,0 +1,92 @@
+{% extends "pretixcontrol/event/settings_base.html" %}
+{% load i18n %}
+{% load static %}
+{% load bootstrap3 %}
+{% block inside %}
+    <h1>{% trans "Payment settings" %}</h1>
+    <form action="" method="post" class="form-horizontal form-plugins">
+        {% csrf_token %}
+        <div class="tabbed-form">
+            <fieldset>
+                <legend>{% trans "Payment providers" %}</legend>
+                <table class="table table-payment-providers">
+                    <tbody>
+                    {% for provider in providers %}
+                        <tr>
+                            <td>
+                                <strong>{{ provider.verbose_name }}</strong>
+                            </td>
+                            <td>
+                                {% if provider.show_enabled %}
+                                    <span class="text-success">
+                                    <span class="fa fa-check"></span>
+                                    {% trans "Enabled" %}
+                                </span>
+                                {% else %}
+                                    <span class="text-danger">
+                                    <span class="fa fa-times"></span>
+                                    {% trans "Disabled" %}
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td class="iconcol">
+                                {% for channel in provider.sales_channels %}
+                                    {% if "." in channel.icon %}
+                                        <img src="{% static channel.icon %}" class="fa-like-image"
+                                             data-toggle="tooltip" title="{{ channel.label }}">
+                                    {% else %}
+                                        <span class="fa fa-{{ channel.icon }} text-muted"
+                                              data-toggle="tooltip" title="{{ channel.label }}"></span>
+                                    {% endif %}
+                                {% endfor %}
+                            </td>
+                            <td class="text-right flip">
+                                <a href="{% url 'control:event.settings.payment.provider' event=request.event.slug organizer=request.organizer.slug provider=provider.identifier %}"
+                                        class="btn btn-default">
+                                    <span class="fa fa-cog"></span>
+                                    {% trans "Settings" %}
+                                </a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                        <tr>
+                            <td colspan="4">
+                                <br>
+                                {% url "control:event.settings.plugins" event=request.event.slug organizer=request.organizer.slug as plugin_settings_url %}
+                                <a href="{{ plugin_settings_url }}#tab-0-1-open" class="btn btn-default">
+                                    <i class="fa fa-plus"></i> {% trans "Enable additional payment plugins" %}
+                                </a>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+            </fieldset>
+            <fieldset>
+                <legend>{% trans "Deadlines" %}</legend>
+                {% bootstrap_form_errors form layout="control" %}
+                {% bootstrap_field form.payment_term_mode layout="control" %}
+                {% bootstrap_field form.payment_term_days layout="control" %}
+                {% bootstrap_field form.payment_term_weekdays layout="control" %}
+                {% bootstrap_field form.payment_term_minutes layout="control" %}
+                {% bootstrap_field form.payment_term_last layout="control" %}
+                {% bootstrap_field form.payment_term_expire_automatically layout="control" %}
+                {% trans "days" context "unit" as days %}
+                {% bootstrap_field form.payment_term_expire_delay_days layout="control" addon_after=days %}
+                {% bootstrap_field form.payment_term_accept_late layout="control" %}
+                {% bootstrap_field form.payment_pending_hidden layout="control" %}
+            </fieldset>
+            <fieldset>
+                <legend>{% trans "Advanced" %}</legend>
+                {% bootstrap_form_errors form layout="control" %}
+                {% bootstrap_field form.tax_rule_payment layout="control" %}
+                {% bootstrap_field form.payment_explanation layout="control" %}
+            </fieldset>
+        </div>
+        <div class="form-group submit-group">
+            <button type="submit" class="btn btn-primary btn-save">
+                {% trans "Save" %}
+            </button>
+        </div>
+    </form>
+{% endblock %}

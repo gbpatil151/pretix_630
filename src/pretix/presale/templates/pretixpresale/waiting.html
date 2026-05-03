@@ -1,0 +1,46 @@
+{% load compress %}
+{% load i18n %}
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ settings.PRETIX_INSTANCE_NAME }}</title>
+    {% compress css %}
+        <link rel="stylesheet" type="text/x-scss" href="{% static "pretixpresale/scss/waiting.scss" %}"/>
+    {% endcompress %}
+    {% compress js %}
+        <script type="text/javascript" src="{% static "jquery/js/jquery-3.6.4.min.js" %}"></script>
+        <script type="text/javascript" src="{% static "pretixbase/js/ajaxpending.js" %}"></script>
+    {% endcompress %}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="10">
+</head>
+<body>
+    <div class="container">
+        <i class="fa fa-cog big-rotating-icon" aria-hidden="true"></i>
+
+        <h1>{% trans "We are processing your request …" %}</h1>
+
+        {% if percentage %}
+            <div class="progress">
+                <div class="progress-bar progress-bar-success progress-bar-{{ percentage|floatformat:0 }}">
+                </div>
+            </div>
+            {% if steps %}
+                <ol class="steps">
+                    {% for step in steps %}
+                        <li>
+                            <span class="fa fa-fw {% if step.done %}fa-check text-success{% else %}fa-cog fa-spin text-muted{% endif %}"></span>
+                            {{ step.label }}
+                        </li>
+                    {% endfor %}
+                </ol>
+            {% endif %}
+        {% endif %}
+
+        <p>
+            {% trans "If this takes longer than a few minutes, please contact us." %}
+        </p>
+    </div>
+</body>
+</html>

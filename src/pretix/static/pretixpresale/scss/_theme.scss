@@ -1,0 +1,161 @@
+h1, .h1,
+h2, .h2,
+h3, .h3 {
+  margin-top: 0.75 * $line-height-computed;
+  margin-bottom: 0.75 * $line-height-computed;
+}
+
+.front-page, .item-category {
+  h1, .h1,
+  h2, .h2,
+  h3, .h3 {
+    margin-top: 2.25 * $line-height-computed;
+  }
+}
+
+.page-header {
+  position: relative;
+  padding-bottom: 9px;
+  margin-top: 20px;
+
+  h1 {
+    margin: 0;
+  }
+  h1 small {
+    white-space: nowrap;
+  }
+  .loginbox {
+    padding-top: 15px;
+  }
+  .event-logo, .organizer-logo {
+    max-width: 100%;
+    height: auto;
+  }
+}
+.pager-header-with-logo a {
+  display: inline-block;
+}
+
+.main-box {
+  background: $main-box-bg;
+}
+
+.page-header-links > div.header-part {
+  padding-top: 15px;
+
+  a {
+    color: var(--pretix-link-contrast-color);
+    outline-color: inherit;
+  }
+  a:active, a:hover, a:focus {
+    color: var(--pretix-link-hover-contrast-color);
+  }
+}
+
+.page-header-links-outside > div.header-part {
+  padding-bottom: 15px;
+}
+
+.page-header.logo-large {
+
+  img {
+    width: 100%;
+  }
+
+  .loginbox {
+    text-align: right;
+    padding: 10px;
+    html.rtl & {
+      text-align: left;
+    }
+  }
+
+  border-bottom: none;
+}
+
+h2.content-header {
+  margin-top: 0;
+}
+
+@media (max-width: $screen-xs-max) {
+  .page-header.logo-large {
+    margin-left: -15px;
+    margin-right: -15px;
+    margin-top: 0;
+  }
+  h2.content-header small {
+    display: block;
+  }
+}
+@media (min-width: $screen-sm-min) {
+  .main-box {
+    margin: calc(20px * var(--pretix-body-bg-white-0)) auto;
+    padding-left: calc(25px * var(--pretix-body-bg-white-0) + 15px * var(--pretix-body-bg-white-1));
+    padding-right: calc(25px * var(--pretix-body-bg-white-0) + 15px * var(--pretix-body-bg-white-1));
+    border-radius: calc(#{$border-radius-large} * var(--pretix-body-bg-white-0));
+  }
+  .page-header-links-outside {
+    padding-left: calc(15px * var(--pretix-body-bg-white-1));
+    padding-right: calc(15px * var(--pretix-body-bg-white-1));
+  }
+  .page-header-links > div.header-part {
+    padding-top: calc(10px * var(--pretix-body-bg-white-0) + 15px * var(--pretix-body-bg-white-1));
+    padding-bottom: calc(10px * var(--pretix-body-bg-white-0));
+    padding-left: 0;
+    padding-right: 0;
+    margin-bottom: calc(-20px * var(--pretix-body-bg-white-0));
+  }
+  .page-header-links-outside > div.header-part {
+    padding-bottom: calc(10px * var(--pretix-body-bg-white-0) + 15px * var(--pretix-body-bg-white-1));
+  }
+
+  .page-header.logo-large {
+    margin-top: 0;
+
+    margin-left: calc(-25px * var(--pretix-body-bg-white-0));
+    margin-right: calc(-25px * var(--pretix-body-bg-white-0));
+
+    img {
+      border-top-right-radius: calc(#{$border-radius-large} * var(--pretix-body-bg-white-0));
+      border-top-left-radius: calc(#{$border-radius-large} * var(--pretix-body-bg-white-0));
+    }
+  }
+
+  .page-header .loginbox {
+    padding-top: 0;
+  }
+}
+
+footer {
+  padding-bottom: calc(10px * var(--pretix-body-bg-white-1));
+}
+
+.label-success-warning {
+  @include label-variant($label-success-bg, $label-success-bg-hover);
+
+  padding-left: 2.5em;
+  position: relative;
+  &::before {
+    font-family: FontAwesome;
+    text-rendering: auto;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-font-smoothing: antialiased;
+    color: white;
+    content: $fa-var-exclamation;
+    background: $label-warning-bg;
+
+    display: block;
+
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 2em;
+
+    padding-top: .5em;
+    text-align: center;
+
+    border-top-left-radius: .25em;
+    border-bottom-left-radius: .25em;
+  }
+}
