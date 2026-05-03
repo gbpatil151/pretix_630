@@ -33,10 +33,8 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under the License.
 import dataclasses
-import hashlib
 import inspect
 import logging
-import mimetypes
 import os
 import re
 import smtplib
@@ -51,21 +49,17 @@ from zoneinfo import ZoneInfo
 
 import requests
 from celery import chain
-from celery.exceptions import MaxRetriesExceededError
 from django.conf import settings
-from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives, SafeMIMEMultipart
-from django.core.mail.message import SafeMIMEText
 from django.db import connection, transaction
 from django.db.models import Q
 from django.dispatch import receiver
 from django.template.loader import get_template
 from django.utils.html import escape
 from django.utils.timezone import now, override
-from django.utils.translation import gettext as _, pgettext
+from django.utils.translation import gettext as _
 from django_scopes import scopes_disabled
 from i18nfield.strings import LazyI18nString
-from text_unidecode import unidecode
 
 from pretix.base.email import ClassicMailRenderer
 from pretix.base.i18n import language
@@ -76,18 +70,13 @@ from pretix.base.models import (
 from pretix.base.models.mail import OutgoingMail
 from pretix.base.services.invoices import invoice_pdf_task
 from pretix.base.services.tasks import TransactionAwareTask
-from pretix.base.services.tickets import get_tickets_for_order
-from pretix.base.signals import (
-    email_filter, global_email_filter, periodic_task,
-)
+from pretix.base.signals import periodic_task
 from pretix.celery_app import app
 from pretix.helpers import OF_SELF
 from pretix.helpers.format import (
     FormattedString, PlainHtmlAlternativeString, SafeFormatter, format_map,
 )
-from pretix.helpers.hierarkey import clean_filename
 from pretix.multidomain.urlreverse import build_absolute_uri
-from pretix.presale.ical import get_private_icals
 
 logger = logging.getLogger('pretix.base.mail')
 INVALID_ADDRESS = 'invalid-pretix-mail-address'
@@ -444,7 +433,9 @@ def mail_send_task(self, **kwargs) -> bool:
     else:
         raise ValueError("Unknown arguments")
 
-    from pretix.base.services.mail_commands import MAIL_SEND_PIPELINE, MailSendContext
+    from pretix.base.services.mail_commands import (
+        MAIL_SEND_PIPELINE, MailSendContext,
+    )
 
     ctx = MailSendContext(
         outgoing_mail_pk=outgoing_mail,

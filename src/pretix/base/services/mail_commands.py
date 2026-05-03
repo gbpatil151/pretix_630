@@ -48,6 +48,7 @@ FilterAndSendCommand     -- apply email filters, deliver, retry on failure
 RecordSuccessCommand     -- update invoice transmission records, log success
 """
 import dataclasses
+import hashlib
 import logging
 import mimetypes
 import os
@@ -55,8 +56,6 @@ import re
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from typing import List, Optional
-
-import hashlib
 
 from celery.exceptions import MaxRetriesExceededError
 from django.conf import settings
@@ -197,8 +196,9 @@ class AttachFilesCommand(MailSendCommand):
     """
 
     def execute(self, ctx: MailSendContext) -> Optional[bool]:
-        from pretix.base.i18n import language
         from django.utils.translation import pgettext
+
+        from pretix.base.i18n import language
 
         om = ctx.outgoing_mail
         email = ctx.email
@@ -334,7 +334,9 @@ class FilterAndSendCommand(MailSendCommand):
     """
 
     def execute(self, ctx: MailSendContext) -> Optional[bool]:
-        from pretix.base.services.mail import WithholdMailException, _format_error, _retry_strategy
+        from pretix.base.services.mail import (
+            WithholdMailException, _format_error, _retry_strategy,
+        )
 
         om = ctx.outgoing_mail
         email = ctx.email
