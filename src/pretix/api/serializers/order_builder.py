@@ -19,12 +19,9 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <https://www.gnu.org/licenses/>.
 #
-
-#
-# This file is part of pretix (Community Edition).
 # Extracted from OrderCreateSerializer.create() as part of Builder pattern refactoring.
 # See issue #61: Spaghetti Code in OrderSerializer.create -> refactor toward Builder
-#
+
 """
 OrderBuilder — Builder pattern for API order creation
 =====================================================
@@ -200,28 +197,6 @@ class OrderBuilder:
                         self.seat_diff_for_locking[cp.seat] -= 1
                     self.seat_usage[cp.seat] -= 1
                 self.delete_cps.append(cp)
-
-        if not self.simulate:
-            full_lock_required = self.seat_diff_for_locking and self.event.settings.seating_minimal_distance > 0
-            if full_lock_required:
-                # We lock the entire event in this case since we don't want to deal with fine-granular locking
-                # in the case of seating distance enforcement
-                lock_objects([self.event])
-            else:
-                lock_objects(
-                    [q for q, d in self.quota_diff_for_locking.items() if d > 0 and q.size is not None and not self.force] +
-                    [v for v, d in self.voucher_diff_for_locking.items() if d > 0 and not self.force] +
-                    [s for s, d in self.seat_diff_for_locking.items() if d > 0],
-                    shared_lock_objects=[self.event]
-                )
-
-        qa = QuotaAvailability()
-        qa.queue(*[q for q, d in self.quota_diff_for_locking.items() if d > 0])
-        qa.compute()
-
-        # These are not technically correct as diff use due to the time offset applied above, so let's prevent accidental
-        # use further down
-        del self.quota_diff_for_locking, self.voucher_diff_for_locking, self.seat_diff_for_locking
 
     def lock_and_validate(self):  # NOSONAR
         """Phase 3: Acquire locks, check quotas, vouchers, seats, validity."""
@@ -476,9 +451,9 @@ class OrderBuilder:
                 ]
             )
             for cp, (new_price, discount) in zip(order_positions, discount_results):
-                if new_price != pos.price and pos._auto_generated_price:
-                    pos.price = new_price
-                pos.discount = discount
+                if new_price != cp.price and cp._auto_generated_price:
+                    cp.price = new_price
+                cp.discount = discount
 
         # Save instances
         for pos_data in self.positions_data:
