@@ -87,7 +87,7 @@ from pretix.base.services.memberships import (
 from pretix.base.services.pricing import (
     apply_discounts, apply_rounding, get_listed_price,
 )
-from pretix.base.services.tasks import ProfiledTask
+from pretix.base.services.tasks import ProfiledEventTask, ProfiledTask
 from pretix.base.services.tax import split_fee_for_taxes
 from pretix.base.signals import (
     order_approved, order_canceled, order_changed, order_denied, order_expired,
@@ -1682,6 +1682,7 @@ def notify_user_changed_order(order, user=None, auth=None, invoices=[]):
         )
 
 
+@app.task(base=ProfiledEventTask, bind=True, max_retries=5, default_retry_delay=1, throws=(OrderError,))
 def perform_order(self, event: Event, payments: List[dict], positions: List[str],
                   email: str=None, locale: str=None, address: int=None, meta_info: dict=None,
                   sales_channel: str='web', shown_total=None, customer=None, override_now_dt: datetime=None,
