@@ -37,7 +37,6 @@ from pretix.base.models.orders import OrderFee
 from pretix.base.services import tickets
 from pretix.base.services.invoices import (
     generate_cancellation, generate_invoice, invoice_qualified,
-    invoice_transmission_separately,
 )
 from pretix.base.services.pricing import apply_rounding
 
@@ -87,12 +86,12 @@ class OrderFeeManager:
                     current_fee = self._ctx.open_payment.fee.value
             total -= current_fee
 
-            if fee and any([isinstance(op, self._ctx.FeeValueOperation) and op.fee == fee
-                            for op in self._ctx._operations]):
+            if fee and any(isinstance(op, self._ctx.FeeValueOperation) and op.fee == fee
+                           for op in self._ctx._operations):
                 # Do not automatically modify a fee that is being manually modified right now
                 payment_fee = fee.value
-            elif fee and any([isinstance(op, self._ctx.CancelFeeOperation) and op.fee == fee
-                              for op in self._ctx._operations]):
+            elif fee and any(isinstance(op, self._ctx.CancelFeeOperation) and op.fee == fee
+                             for op in self._ctx._operations):
                 # Do not automatically modify a fee that is being manually removed right now
                 payment_fee = Decimal('0.00')
             elif self._ctx.order.pending_sum - current_fee != 0:

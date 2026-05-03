@@ -35,7 +35,7 @@ The public API is identical to the original monolithic class.  Callers do not
 need to change any code.
 """
 
-import json
+
 import logging
 from collections import Counter, defaultdict, namedtuple
 from datetime import datetime
@@ -46,15 +46,15 @@ from django.db import transaction
 from django.db.models import Count, QuerySet, Sum
 from django.utils.functional import cached_property
 from django.utils.timezone import now
-from django.utils.translation import gettext as _, gettext_lazy, ngettext_lazy
+from django.utils.translation import gettext_lazy, ngettext_lazy
 
 from pretix.base.models import (
-    CartPosition, Item, ItemVariation, Membership, Order,
-    OrderPayment, OrderPosition, Quota, Seat, Voucher,
+    Item, ItemVariation, Membership, Order,
+    OrderPayment, OrderPosition, Seat,
 )
 from pretix.base.models.event import SubEvent
 from pretix.base.models.orders import (
-    InvoiceAddress, OrderFee, OrderRefund, generate_secret,
+    InvoiceAddress, OrderFee, OrderRefund,
 )
 from pretix.base.models.tax import TAXED_ZERO, TaxedPrice, TaxRule
 from pretix.base.services.invoices import (
@@ -62,7 +62,7 @@ from pretix.base.services.invoices import (
 )
 from pretix.base.services.orders import OrderError, error_messages, notify_user_changed_order
 from pretix.base.services.pricing import get_price
-from pretix.base.services import tickets
+
 from pretix.base.signals import order_changed
 from pretix.helpers import OF_SELF
 
@@ -71,6 +71,7 @@ from pretix.base.services.order_change.fee_manager import OrderFeeManager
 from pretix.base.services.order_change.executor import OrderOperationExecutor
 
 logger = logging.getLogger(__name__)
+
 
 class OrderChangeManager:
     error_messages = {
@@ -125,7 +126,7 @@ class OrderChangeManager:
     ChangeValidUntilOperation = namedtuple('ChangeValidUntilOperation', ('position', 'valid_until'))
     AddBlockOperation = namedtuple('AddBlockOperation', ('position', 'block_name', 'ignore_from_quota_while_blocked'))
     RemoveBlockOperation = namedtuple('RemoveBlockOperation', ('position', 'block_name', 'ignore_from_quota_while_blocked'))
-    ForceRecomputeOperation = namedtuple('ForceRecomputeOperation', tuple())
+    ForceRecomputeOperation = namedtuple('ForceRecomputeOperation', ())
 
     class AddPositionResult:
         _position: Optional[OrderPosition]
@@ -674,7 +675,6 @@ class OrderChangeManager:
                     }
                 )
 
-
     def _check_seats(self):
         """Delegate to OrderChangeValidator."""
         self._validator.check_seats()
@@ -745,6 +745,7 @@ class OrderChangeManager:
             state__in=(OrderRefund.REFUND_STATE_DONE, OrderRefund.REFUND_STATE_TRANSIT, OrderRefund.REFUND_STATE_DONE)
         ).aggregate(s=Sum('amount'))['s'] or Decimal('0.00')
         return payment_sum - refund_sum
+
     @property
     def _invoice_address(self):
         try:
@@ -836,4 +837,3 @@ class OrderChangeManager:
             transmit_invoice.apply_async(args=(self.event.pk, i.pk, False))
 
         order_changed.send(self.order.event, order=self.order)
-

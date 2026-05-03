@@ -39,12 +39,10 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.utils.translation import gettext as _
 
 from pretix.base.models import (
     CartPosition, Order, OrderPayment, Quota,
 )
-from pretix.base.models.orders import OrderFee
 from pretix.base.payment import PaymentException
 from pretix.base.services.locking import lock_objects
 from pretix.base.services.memberships import validate_memberships_in_order
@@ -216,7 +214,6 @@ class OrderChangeValidator:
         """When the order total drops to zero, either cancel it or create a
         free payment to move it to paid status.  Also handles the split order."""
         order = self._ctx.order
-        from django.utils.timezone import now as tz_now
 
         if self._ctx.event.currency == 'XXX' and order.total + totaldiff > Decimal("0.00"):
             raise OrderError(error_messages['currency_XXX'])

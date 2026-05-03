@@ -501,7 +501,7 @@ class OrderOperationExecutor:
         split_order.total = sum([p.price for p in split_positions if not p.canceled])
 
         if split_order.total != Decimal('0.00') and self._ctx.order.status != Order.STATUS_PAID:
-            pp = self._get_payment_provider()
+            pp = self._ctx._get_payment_provider()
             if pp:
                 payment_fee = pp.calculate_fee(split_order.total)
             else:
@@ -525,13 +525,13 @@ class OrderOperationExecutor:
             ))
             split_order.total = sum([p.price for p in split_positions if not p.canceled]) + sum([f.value for f in fees])
 
-        for l in changed_by_rounding:
-            if isinstance(l, OrderPosition):
-                l.save(update_fields=[
+        for line in changed_by_rounding:
+            if isinstance(line, OrderPosition):
+                line.save(update_fields=[
                     "price", "price_includes_rounding_correction", "tax_value", "tax_value_includes_rounding_correction"
                 ])
-            elif isinstance(l, OrderFee):
-                l.save(update_fields=[
+            elif isinstance(line, OrderFee):
+                line.save(update_fields=[
                     "value", "value_includes_rounding_correction", "tax_value", "tax_value_includes_rounding_correction"
                 ])
         split_order.total = sum([p.price for p in split_positions if not p.canceled]) + sum([f.value for f in fees])
