@@ -1,3 +1,24 @@
+#
+# This file is part of pretix (Community Edition).
+#
+# Copyright (C) 2014-2020  Raphael Michel and contributors
+# Copyright (C) 2020-today pretix GmbH and contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+# Public License as published by the Free Software Foundation in version 3 of the License.
+#
+# ADDITIONAL TERMS APPLY: Pursuant to Section 7 of the GNU Affero General Public License, additional terms are
+# applicable granting you additional permissions and placing additional restrictions on your usage of this software.
+# Please refer to the pretix LICENSE file to obtain the full terms applicable to this work. If you did not receive
+# this file, see <https://pretix.eu/about/en/license>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
+# <https://www.gnu.org/licenses/>.
+#
 import os
 from dataclasses import dataclass, field
 
@@ -149,7 +170,7 @@ class EventCopyBuilder:
         for i in self.target.items.filter(hidden_if_item_available__isnull=False):
             i.hidden_if_item_available = self.ctx.item_map[i.hidden_if_item_available_id]
             i.save()
-            
+
         return self
 
     def copy_item_meta_values(self):
@@ -164,7 +185,7 @@ class EventCopyBuilder:
             imv.property = self.ctx.item_meta_properties_map[imv.property_id]
             imv.variation = self.ctx.variation_map[imv.variation_id]
             imv.save(force_insert=True)
-            
+
         return self
 
     def copy_bundles_and_addons(self):
@@ -187,7 +208,7 @@ class EventCopyBuilder:
                 ipt.pk = None
                 ipt.item = self.ctx.item_map[ipt.item.pk]
                 ipt.save(force_insert=True)
-                
+
         return self
 
     def copy_quotas(self):
@@ -208,7 +229,7 @@ class EventCopyBuilder:
             for v in vars:
                 q.variations.add(self.ctx.variation_map[v.pk])
             self.target.items.filter(hidden_if_available_id=oldid).update(hidden_if_available=q)
-            
+
         return self
 
     def copy_discounts(self):
@@ -232,7 +253,7 @@ class EventCopyBuilder:
 
             if not d.all_sales_channels:
                 d.limit_sales_channels.set(self.target.organizer.sales_channels.filter(identifier__in=[s.identifier for s in limit_sales_channels]))
-                
+
         return self
 
     def copy_questions(self):
@@ -256,7 +277,7 @@ class EventCopyBuilder:
         for q in self.target.questions.filter(dependency_question__isnull=False):
             q.dependency_question = self.ctx.question_map[q.dependency_question_id]
             q.save(update_fields=['dependency_question'])
-            
+
         return self
 
     def copy_checkin_lists(self):
@@ -289,7 +310,7 @@ class EventCopyBuilder:
             cl.log_action('pretix.object.cloned')
             for i in items:
                 cl.limit_products.add(self.ctx.item_map[i.pk])
-                
+
         return self
 
     def copy_seating_plans(self):
@@ -316,7 +337,7 @@ class EventCopyBuilder:
             if s.product_id:
                 s.product = self.ctx.item_map[s.product_id]
             s.save(force_insert=True)
-            
+
         return self
 
     def copy_settings(self):

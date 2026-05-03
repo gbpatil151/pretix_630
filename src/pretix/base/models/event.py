@@ -46,7 +46,6 @@ from zoneinfo import ZoneInfo
 import pytz_deprecation_shim
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.files import File
 from django.core.files.storage import default_storage
 from django.core.mail import get_connection
 from django.core.validators import (
@@ -72,7 +71,6 @@ from pretix.base.timemachine import time_machine_now
 from pretix.base.validators import EventSlugBanlistValidator
 from pretix.helpers.database import GroupConcat
 from pretix.helpers.daterange import daterange
-from pretix.helpers.hierarkey import clean_filename
 from pretix.helpers.json import CustomJSONEncoder, safe_string
 from pretix.helpers.thumb import get_thumbnail
 
@@ -847,7 +845,7 @@ class Event(EventMixin, LoggedModel):
         from pretix.base.services.event_copy import EventCopyBuilder
 
         builder = EventCopyBuilder(source_event=other, target_event=self)
-        
+
         builder.copy_basic_info(skip_meta_data=skip_meta_data)
         builder.copy_tax_rules()
         builder.copy_categories()
