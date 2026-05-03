@@ -137,7 +137,7 @@ def get_listed_price(item: Item, variation: ItemVariation = None, subevent: SubE
     return price
 
 
-def get_line_price(price_after_voucher: Decimal, custom_price_input: Decimal, custom_price_input_is_net: bool,
+def get_line_price(price_after_voucher: Decimal, custom_price_input: Optional[Decimal], custom_price_input_is_net: bool,
                    tax_rule: TaxRule, invoice_address: InvoiceAddress, bundled_sum: Decimal,
                    is_bundled=False) -> TaxedPrice:
     if not tax_rule:

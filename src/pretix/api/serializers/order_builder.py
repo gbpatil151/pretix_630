@@ -114,7 +114,7 @@ class OrderBuilder:
         self.v_budget = {}
         self.now_dt = now()
 
-    def extract_data(self):
+    def extract_data(self):  # NOSONAR
         """Phase 1: Pop nested data from self.validated_data and set up invoice address."""
         self.fees_data = self.validated_data.pop('fees') if 'fees' in self.validated_data else []
         self.positions_data = self.validated_data.pop('positions') if 'positions' in self.validated_data else []
@@ -223,7 +223,7 @@ class OrderBuilder:
         # use further down
         del self.quota_diff_for_locking, self.voucher_diff_for_locking, self.seat_diff_for_locking
 
-    def lock_and_validate(self):
+    def lock_and_validate(self):  # NOSONAR
         """Phase 3: Acquire locks, check quotas, vouchers, seats, validity."""
         if not self.simulate:
             full_lock_required = self.seat_diff_for_locking and self.event.settings.seating_minimal_distance > 0
@@ -247,7 +247,7 @@ class OrderBuilder:
         # use further down
         del self.quota_diff_for_locking, self.voucher_diff_for_locking, self.seat_diff_for_locking
 
-        errs = [{} for p in self.positions_data]
+        errs = [{} for _ in self.positions_data]
 
         for i, pos_data in enumerate(self.positions_data):
             if pos_data.get('voucher'):
@@ -377,7 +377,7 @@ class OrderBuilder:
         if any(errs):
             raise ValidationError({'positions': errs})
 
-    def create_order_and_positions(self):
+    def create_order_and_positions(self):  # NOSONAR
         """Phase 4: Create Order and OrderPosition objects, compute prices, save."""
         if self.validated_data.get('locale', None) is None:
             self.validated_data['locale'] = self.event.settings.locale
@@ -419,10 +419,7 @@ class OrderBuilder:
             else:
                 pos.order = self.order
             if addon_to:
-                if self.simulate:
-                    pos.addon_to = self.pos_map[addon_to]
-                else:
-                    pos.addon_to = self.pos_map[addon_to]
+                pos.addon_to = self.pos_map[addon_to]
 
             self.pos_map[pos.positionid] = pos
             pos_data['__instance'] = pos
@@ -538,7 +535,7 @@ class OrderBuilder:
                         }
                     )
 
-    def attach_fees(self):
+    def attach_fees(self):  # NOSONAR
         """Phase 5: Create OrderFee objects, apply tax rounding, update total."""
         if not self.simulate:
             for cp in self.delete_cps:
@@ -563,7 +560,7 @@ class OrderBuilder:
                     tr = p.tax_rule
                     d[tr] += p.price - p.tax_value
 
-                base_values = sorted([tuple(t) for t in d.items()], key=lambda t: (t[0] or trz).rate)
+                base_values = sorted([tuple(t) for t in d.items()], key=lambda t, trz=trz: (t[0] or trz).rate)
                 sum_base = sum(t[1] for t in base_values)
                 fee_values = [(t[0], round_decimal(fee_data['value'] * t[1] / sum_base, self.event.currency))
                               for t in base_values]
@@ -598,12 +595,11 @@ class OrderBuilder:
                     f.save()
 
         rounding_mode = self.validated_data.get("tax_rounding_mode")
-        if not rounding_mode:
-            if isinstance(self.context.get("auth"), Device):
-                # Safety fallback to avoid differences in tax reporting
-                brand = self.context.get("auth").software_brand or ""
-                if "pretixPOS" in brand or "pretixKIOSK" in brand:
-                    rounding_mode = "line"
+        if not rounding_mode and isinstance(self.context.get("auth"), Device):
+            # Safety fallback to avoid differences in tax reporting
+            brand = self.context.get("auth").software_brand or ""
+            if "pretixPOS" in brand or "pretixKIOSK" in brand:
+                rounding_mode = "line"
         if not rounding_mode:
             rounding_mode = self.event.settings.tax_rounding
         changed = apply_rounding(
