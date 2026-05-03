@@ -362,7 +362,7 @@ class PaidMarker(Flowable):
         self.size = size
         self._showBoundary = True
 
-    def wrap(self, _availwidth, _availheight):
+    def wrap(self, availwidth, availheight):
         # Fake a size, we don't care if we exceed the table
         return 10, self.size / 2
 

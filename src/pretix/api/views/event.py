@@ -188,7 +188,7 @@ class EventViewSet(viewsets.ModelViewSet):
             ),
         )
 
-    def list(self, request, *args, **_kwargs):
+    def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
 
         page = self.paginate_queryset(queryset)
@@ -474,7 +474,7 @@ class SubEventViewSet(ConditionalListView, viewsets.ModelViewSet):
             ),
         )
 
-    def list(self, request, **_kwargs):
+    def list(self, request, **kwargs):
         date = serializers.DateTimeField().to_representation(now())
         queryset = self.filter_queryset(self.get_queryset())
 
@@ -638,7 +638,7 @@ class EventSettingsView(views.APIView):
     permission = None
     write_permission = 'can_change_event_settings'
 
-    def get(self, request, *args, **_kwargs):
+    def get(self, request, *args, **kwargs):
         if isinstance(request.auth, Device):
             s = DeviceEventSettingsSerializer(instance=request.event.settings, event=request.event, context={
                 'request': request
@@ -660,7 +660,7 @@ class EventSettingsView(views.APIView):
             })
         return Response(s.data)
 
-    def patch(self, request, *_args, **_kwargs):
+    def patch(self, request, *wargs, **kwargs):
         s = EventSettingsSerializer(instance=request.event.settings, data=request.data, partial=True,
                                     event=request.event, context={'request': request})
         s.is_valid(raise_exception=True)
@@ -766,9 +766,9 @@ class SeatViewSet(ConditionalListView, viewsets.ModelViewSet):
         return Response({})
 
     @action(methods=["POST"], detail=False)
-    def bulk_block(self, request, *args, **_kwargs):
+    def bulk_block(self, request, *args, **kwargs):
         return self.bulk_change_blocked(True)
 
     @action(methods=["POST"], detail=False)
-    def bulk_unblock(self, request, *args, **_kwargs):
+    def bulk_unblock(self, request, *args, **kwargs):
         return self.bulk_change_blocked(False)

@@ -308,7 +308,7 @@ class GiftCardViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["POST"])
     @transaction.atomic()
-    def transact(self, request, **_kwargs):
+    def transact(self, request, **kwargs):
         gc = GiftCard.objects.select_for_update(of=OF_SELF).get(pk=self.get_object().pk)
         value = serializers.DecimalField(max_digits=13, decimal_places=2).to_internal_value(
             request.data.get('value')
@@ -508,7 +508,7 @@ class TeamAPITokenViewSet(CreateModelMixin, DestroyModelMixin, viewsets.ReadOnly
             }
         )
 
-    def create(self, request, *args, **_kwargs):
+    def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -517,7 +517,7 @@ class TeamAPITokenViewSet(CreateModelMixin, DestroyModelMixin, viewsets.ReadOnly
         d['token'] = serializer.instance.token
         return Response(d, status=status.HTTP_201_CREATED, headers=headers)
 
-    def destroy(self, request, *args, **_kwargs):
+    def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         self.perform_destroy(instance)
         serializer = self.get_serializer_class()(instance)
@@ -570,7 +570,7 @@ class OrganizerSettingsView(views.APIView):
     permission = None
     write_permission = 'can_change_organizer_settings'
 
-    def get(self, request, *args, **_kwargs):
+    def get(self, request, *args, **kwargs):
         s = OrganizerSettingsSerializer(instance=request.organizer.settings, organizer=request.organizer, context={
             'request': request
         })
@@ -585,7 +585,7 @@ class OrganizerSettingsView(views.APIView):
             })
         return Response(s.data)
 
-    def patch(self, request, *_args, **_kwargs):
+    def patch(self, request, *wargs, **kwargs):
         s = OrganizerSettingsSerializer(
             instance=request.organizer.settings, data=request.data, partial=True,
             organizer=request.organizer, context={
@@ -648,7 +648,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
             customer.send_activation_mail()
         return customer
 
-    def create(self, request, *args, **_kwargs):
+    def create(self, request, *args, **kwargs):
         serializer = CustomerCreateSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer, send_email=serializer.validated_data.pop('send_email', False), password=serializer.validated_data.pop('password', None))
@@ -668,7 +668,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["POST"])
     @transaction.atomic()
-    def anonymize(self, request, **_kwargs):
+    def anonymize(self, request, **kwargs):
         o = self.get_object()
         o.anonymize()
         o.log_action('pretix.customer.anonymized', user=self.request.user, auth=self.request.auth)

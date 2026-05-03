@@ -85,7 +85,7 @@ class SafeFormatter(Formatter):
                     value = self.linkifier.linkify(value)
             return value
 
-    def format_field(self, value, _format_spec):
+    def format_field(self, value, format_spec):
         # Ignore format_spec
         return super().format_field(self._prepare_value(value), '')
 

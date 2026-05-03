@@ -57,7 +57,7 @@ class LazyDate:
     def __init__(self, value):
         self.value = value
 
-    def __format__(self, _format_spec):
+    def __format__(self, format_spec):
         return self.__str__()
 
     def __str__(self):
@@ -68,7 +68,7 @@ class LazyExpiresDate:
     def __init__(self, expires):
         self.value = expires
 
-    def __format__(self, _format_spec):
+    def __format__(self, format_spec):
         return self.__str__()
 
     def __str__(self):
@@ -84,7 +84,7 @@ class LazyCurrencyNumber:
         self.value = value
         self.currency = currency
 
-    def __format__(self, _format_spec):
+    def __format__(self, format_spec):
         return self.__str__()
 
     def __str__(self):
@@ -98,7 +98,7 @@ class LazyNumber:
         self.value = value
         self.decimal_pos = decimal_pos
 
-    def __format__(self, _format_spec):
+    def __format__(self, format_spec):
         return self.__str__()
 
     def __str__(self):

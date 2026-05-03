@@ -46,6 +46,7 @@ recursive-include src *.txt
 recursive-include src Makefile
 
 recursive-include docs *.md
+recursive-include docs *.csv
 recursive-exclude doc *
 recursive-exclude deployment *
 recursive-exclude res *
