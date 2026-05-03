@@ -305,7 +305,6 @@ class AttachFilesCommand(MailSendCommand):
                     content = inv.file.file.read()
                     with language(inv.order.locale):
                         email.attach(filename, content, 'application/pdf')
-                    invoices_to_mark_transmitted.append(inv)
                 except Exception:
                     logger.exception(f'Could not attach invoice to email {om.guid}')
                 else:
