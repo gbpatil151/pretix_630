@@ -24,7 +24,6 @@ import logging
 import time
 from collections import OrderedDict
 from datetime import timedelta
-from pretix.base.registry import PluginRegistry
 
 import requests
 from django.db import DatabaseError, connection, transaction
@@ -40,6 +39,7 @@ from pretix.api.models import (
 )
 from pretix.api.signals import register_webhook_events
 from pretix.base.models import LogEntry
+from pretix.base.registry import PluginRegistry
 from pretix.base.services.tasks import ProfiledTask, TransactionAwareTask
 from pretix.base.signals import periodic_task
 from pretix.celery_app import app
@@ -47,7 +47,6 @@ from pretix.helpers import OF_SELF
 from pretix.helpers.celery import get_task_priority
 
 logger = logging.getLogger(__name__)
-
 
 
 class WebhookEvent:
@@ -100,7 +99,9 @@ class WebhookEventRegistry(PluginRegistry):
                 types[ret.action_type] = ret
         return types
 
+
 _WEBHOOK_EVENT_REGISTRY = WebhookEventRegistry()
+
 
 def get_all_webhook_events():
     return _WEBHOOK_EVENT_REGISTRY.get_or_create()

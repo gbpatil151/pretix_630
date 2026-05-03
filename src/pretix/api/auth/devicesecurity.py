@@ -21,15 +21,14 @@
 #
 import logging
 from collections import OrderedDict
-from pretix.base.registry import PluginRegistry
 
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
 from pretix.api.signals import register_device_security_profile
+from pretix.base.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
-
 
 
 class BaseSecurityProfile:
@@ -168,7 +167,9 @@ class SecurityProfileRegistry(PluginRegistry):
                 types[ret.identifier] = ret
         return types
 
+
 _SECURITY_PROFILE_REGISTRY = SecurityProfileRegistry()
+
 
 def get_all_security_profiles():
     return _SECURITY_PROFILE_REGISTRY.get_or_create()

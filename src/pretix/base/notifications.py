@@ -35,19 +35,18 @@
 import logging
 from collections import OrderedDict, namedtuple
 from itertools import groupby
-from pretix.base.registry import PluginRegistry
 
 from django.dispatch import receiver
 from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _, pgettext_lazy
 
 from pretix.base.models import Event, LogEntry
+from pretix.base.registry import PluginRegistry
 from pretix.base.signals import register_notification_types
 from pretix.base.templatetags.money import money_filter
 from pretix.helpers.urls import build_absolute_uri
 
 logger = logging.getLogger(__name__)
-
 
 
 NotificationAttribute = namedtuple('NotificationAttribute', ('title', 'value'))
@@ -68,7 +67,7 @@ class Notification:
       each consisting of a button label and an absolute URL to point to.
     """
 
-    def __init__(self, event: Event, title: str, detail: str=None, url: str=None):
+    def __init__(self, event: Event, title: str, detail: str = None, url: str = None):
         self.title = title
         self.event = event
         self.detail = detail
@@ -145,7 +144,9 @@ class NotificationTypeRegistry(PluginRegistry):
                 types[ret.action_type] = ret
         return types
 
+
 _NOTIFICATION_TYPE_REGISTRY = NotificationTypeRegistry()
+
 
 def get_all_notification_types(event=None):
     if event is None:

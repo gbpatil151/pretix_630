@@ -61,6 +61,7 @@ from pretix.base.models import (
     SalesChannel, SubEvent, SubEventMetaValue, Team, TeamAPIToken, TeamInvite,
     Voucher,
 )
+from pretix.base.registry import PluginRegistry
 from pretix.base.signals import register_payment_providers
 from pretix.base.timeframes import (
     DateFrameField,
@@ -76,7 +77,7 @@ from pretix.helpers.database import (
 from pretix.helpers.dicts import move_to_end
 from pretix.helpers.i18n import get_format_without_seconds, i18ncomp
 from pretix.helpers.models import flatten_choices
-from pretix.base.registry import PluginRegistry
+
 
 class PaymentProviderRegistry(PluginRegistry):
     def _collect(self, **kwargs):
@@ -134,7 +135,9 @@ class PaymentProviderRegistry(PluginRegistry):
                         choices.append((prov.identifier, prov.verbose_name))
         return choices
 
+
 _PAYMENT_PROVIDER_REGISTRY = PaymentProviderRegistry()
+
 
 def get_all_payment_providers():
     return _PAYMENT_PROVIDER_REGISTRY.get_or_create()

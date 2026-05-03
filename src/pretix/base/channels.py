@@ -22,17 +22,14 @@
 import logging
 import warnings
 from collections import OrderedDict
-from pretix.base.registry import PluginRegistry
 
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
-from pretix.base.signals import (
-    register_sales_channel_types, register_sales_channels,
-)
+from pretix.base.registry import PluginRegistry
+from pretix.base.signals import register_sales_channel_types
 
 logger = logging.getLogger(__name__)
-
 
 
 class SalesChannelType:
@@ -134,8 +131,9 @@ class SalesChannelType:
 
 class ChannelTypeRegistry(PluginRegistry):
     def _collect(self, **kwargs):
-        from pretix.base.signals import register_sales_channel_types
-        from pretix.base.signals import register_sales_channels
+        from pretix.base.signals import (
+            register_sales_channel_types, register_sales_channels,
+        )
 
         channels = []
         for recv, ret in register_sales_channel_types.send(None):
@@ -154,7 +152,9 @@ class ChannelTypeRegistry(PluginRegistry):
             cache.move_to_end('web', last=False)
         return cache
 
+
 _CHANNEL_TYPE_REGISTRY = ChannelTypeRegistry()
+
 
 def get_all_sales_channel_types():
     return _CHANNEL_TYPE_REGISTRY.get_or_create()
