@@ -35,6 +35,7 @@
 import logging
 from collections import OrderedDict, namedtuple
 from itertools import groupby
+from pretix.base.registry import PluginRegistry
 
 from django.dispatch import receiver
 from django.utils.formats import date_format
@@ -46,7 +47,7 @@ from pretix.base.templatetags.money import money_filter
 from pretix.helpers.urls import build_absolute_uri
 
 logger = logging.getLogger(__name__)
-_ALL_TYPES = None
+
 
 
 NotificationAttribute = namedtuple('NotificationAttribute', ('title', 'value'))
@@ -132,22 +133,24 @@ class NotificationType:
         )
 
 
+class NotificationTypeRegistry(PluginRegistry):
+    def _collect(self, event=None):
+        from pretix.base.signals import register_notification_types
+        types = OrderedDict()
+        for recv, ret in register_notification_types.send(event):
+            if isinstance(ret, (list, tuple)):
+                for r in ret:
+                    types[r.action_type] = r
+            else:
+                types[ret.action_type] = ret
+        return types
+
+_NOTIFICATION_TYPE_REGISTRY = NotificationTypeRegistry()
+
 def get_all_notification_types(event=None):
-    global _ALL_TYPES
-
-    if event is None and _ALL_TYPES:
-        return _ALL_TYPES
-
-    types = OrderedDict()
-    for recv, ret in register_notification_types.send(event):
-        if isinstance(ret, (list, tuple)):
-            for r in ret:
-                types[r.action_type] = r
-        else:
-            types[ret.action_type] = ret
     if event is None:
-        _ALL_TYPES = types
-    return types
+        return _NOTIFICATION_TYPE_REGISTRY.get_or_create()
+    return _NOTIFICATION_TYPE_REGISTRY._collect(event=event)
 
 
 class ParametrizedOrderNotificationType(NotificationType):
