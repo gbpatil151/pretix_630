@@ -25,27 +25,18 @@ from decimal import Decimal
 from io import BytesIO
 
 from django.contrib import messages
-from django.contrib.staticfiles import finders
-from django.core.files import File
 from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
-from django.templatetags.static import static
 from django.urls import reverse
 from django.utils.functional import cached_property
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
-from django.views import View
 from django.views.generic import CreateView, DetailView, ListView
 from pypdf import PdfWriter
-from reportlab.lib import pagesizes
-from reportlab.pdfgen import canvas
 
-from pretix.base.models import CachedFile, OrderPosition
-from pretix.base.pdf import Renderer
-from pretix.base.views.tasks import AsyncAction
+from pretix.base.models import CachedFile
 from pretix.control.permissions import EventPermissionRequiredMixin
 from pretix.control.views.pdf import BaseEditorView, BaseLayoutEditorView, BaseOrderPrintDo
 from pretix.helpers.models import modelcopy
@@ -219,8 +210,8 @@ class LayoutEditorView(BaseLayoutEditorView):
     def title(self):
         return _('Badge layout: {}').format(self.layout)
 
-    def get_default_background(self):
-        return static('pretixplugins/badges/badge_default_a6l.pdf')
+    def get_default_background_relpath(self):
+        return 'pretixplugins/badges/badge_default_a6l.pdf'
 
 
 class OrderPrintDo(BaseOrderPrintDo):

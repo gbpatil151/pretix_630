@@ -27,28 +27,35 @@ from decimal import Decimal
 from io import BytesIO
 
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.core.files import File
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.http import (
-    FileResponse, HttpResponse, HttpResponseBadRequest, JsonResponse,
+    FileResponse, HttpResponse, HttpResponseBadRequest, Http404, JsonResponse,
 )
 from django.shortcuts import get_object_or_404, render
+from django.templatetags.static import static
 from django.urls import reverse
 from django.utils.crypto import get_random_string
+from django.utils.functional import cached_property
 from django.utils.timezone import now
 from django.utils.translation import gettext as _
+from django.views import View
 from django.views.generic import TemplateView
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
+from reportlab.lib import pagesizes
 from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
 
 from pretix.base.i18n import language
 from pretix.base.models import (
     CachedFile, InvoiceAddress, ItemProgramTime, OrderPosition,
 )
-from pretix.base.pdf import get_images, get_variables
+from pretix.base.pdf import Renderer, get_images, get_variables
 from pretix.base.settings import PERSON_NAME_SCHEMES
+from pretix.base.views.tasks import AsyncAction
 from pretix.control.permissions import EventPermissionRequiredMixin
 from pretix.helpers.database import rolledback_transaction
 from pretix.presale.style import get_fonts
@@ -325,6 +332,12 @@ class BaseLayoutEditorView(BaseEditorView):
     def get_render_background_title(self):
         raise NotImplementedError()
 
+    def get_default_background_relpath(self):
+        raise NotImplementedError()
+
+    def get_default_background(self):
+        return static(self.get_default_background_relpath())
+
     @cached_property
     def layout(self):
         try:
@@ -370,9 +383,7 @@ class BaseLayoutEditorView(BaseEditorView):
         return ctx
 
     def generate(self, op: OrderPosition, override_layout=None, override_background=None):
-        from pretix.base.pdf import Renderer
-        # Using self.request.event to match ticket behavior, and badges also ignores the argument if not used
-        Renderer._register_fonts(getattr(self.request, 'event', None))
+        Renderer._register_fonts(self.request.event)
 
         buffer = BytesIO()
         if override_background:
@@ -380,23 +391,18 @@ class BaseLayoutEditorView(BaseEditorView):
         elif isinstance(self.layout.background, File) and self.layout.background.name:
             bgf = default_storage.open(self.layout.background.name, "rb")
         else:
-            from django.contrib.staticfiles import finders
-            bgf = open(finders.find(self.get_default_background()), "rb")
+            bgf = open(finders.find(self.get_default_background_relpath()), "rb")
         r = Renderer(
             self.request.event,
             override_layout or self.get_current_layout(),
             bgf,
         )
-        from reportlab.pdfgen import canvas
-        from reportlab.lib import pagesizes
         p = canvas.Canvas(buffer, pagesize=pagesizes.A4)
         r.draw_page(p, op.order, op)
         p.save()
         outbuffer = r.render_background(buffer, self.get_render_background_title())
         return self.get_output_filename(), 'application/pdf', outbuffer.read()
 
-from pretix.base.views.tasks import AsyncAction
-from django.views import View
 
 class BaseOrderPrintDo(EventPermissionRequiredMixin, AsyncAction, View):
     permission = 'can_view_orders'

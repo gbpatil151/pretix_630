@@ -50,7 +50,6 @@ from pretix.helpers.models import modelcopy
 from pretix.plugins.ticketoutputpdf.forms import TicketLayoutForm
 from pretix.plugins.ticketoutputpdf.ticketoutput import PdfTicketOutput
 
-from ...base.views.tasks import AsyncAction
 from ...helpers.compat import CompatDeleteView
 from .models import TicketLayout
 from .tasks import tickets_create_pdf
@@ -254,8 +253,8 @@ class LayoutEditorView(BaseLayoutEditorView):
     def post_save_hook(self):
         invalidate_cache.apply_async(kwargs={'event': self.request.event.pk, 'provider': 'pdf'})
 
-    def get_default_background(self):
-        return static('pretixpresale/pdf/ticket_default_a4.pdf')
+    def get_default_background_relpath(self):
+        return 'pretixpresale/pdf/ticket_default_a4.pdf'
 
 
 class OrderPrintDo(BaseOrderPrintDo):
