@@ -19,15 +19,10 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <https://www.gnu.org/licenses/>.
 #
-import json
 import logging
 from datetime import timedelta
-from io import BytesIO
 
 from django.contrib import messages
-from django.contrib.staticfiles import finders
-from django.core.files import File
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
@@ -38,14 +33,13 @@ from django.utils.timezone import now
 from django.utils.translation import gettext, gettext_lazy as _
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView
-from reportlab.lib import pagesizes
-from reportlab.pdfgen import canvas
 
 from pretix.base.models import CachedFile, OrderPosition
-from pretix.base.pdf import Renderer
 from pretix.base.services.tickets import invalidate_cache
 from pretix.control.permissions import EventPermissionRequiredMixin
-from pretix.control.views.pdf import BaseEditorView, BaseLayoutEditorView, BaseOrderPrintDo
+from pretix.control.views.pdf import (
+    BaseEditorView, BaseLayoutEditorView, BaseOrderPrintDo,
+)
 from pretix.helpers.models import modelcopy
 from pretix.plugins.ticketoutputpdf.forms import TicketLayoutForm
 from pretix.plugins.ticketoutputpdf.ticketoutput import PdfTicketOutput

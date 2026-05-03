@@ -32,7 +32,7 @@ from django.core.files import File
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.http import (
-    FileResponse, HttpResponse, HttpResponseBadRequest, Http404, JsonResponse,
+    FileResponse, Http404, HttpResponse, HttpResponseBadRequest, JsonResponse,
 )
 from django.shortcuts import get_object_or_404, render
 from django.templatetags.static import static
@@ -319,6 +319,7 @@ class PdfView(TemplateView):
         resp['Content-Disposition'] = 'attachment; filename="{}"'.format(cf.filename)
         return resp
 
+
 class BaseLayoutEditorView(BaseEditorView):
     def get_layout_model(self):
         raise NotImplementedError()
@@ -424,4 +425,3 @@ class BaseOrderPrintDo(EventPermissionRequiredMixin, AsyncAction, View):
         if isinstance(exception, str):
             return exception
         return super().get_error_message(exception)
-

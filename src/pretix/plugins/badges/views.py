@@ -38,7 +38,7 @@ from pypdf import PdfWriter
 
 from pretix.base.models import CachedFile
 from pretix.control.permissions import EventPermissionRequiredMixin
-from pretix.control.views.pdf import BaseEditorView, BaseLayoutEditorView, BaseOrderPrintDo
+from pretix.control.views.pdf import BaseLayoutEditorView, BaseOrderPrintDo
 from pretix.helpers.models import modelcopy
 from pretix.plugins.badges.forms import BadgeLayoutForm
 from pretix.plugins.badges.tasks import badges_create_pdf
