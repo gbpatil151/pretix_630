@@ -1,5 +1,6 @@
 #
-# This file is part of pretix (Community Edition).\n#
+# This file is part of pretix (Community Edition).
+#
 # Copyright (C) 2014-2020  Raphael Michel and contributors
 # Copyright (C) 2020-today pretix GmbH and contributors
 #

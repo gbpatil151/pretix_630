@@ -20,14 +20,12 @@
 # <https://www.gnu.org/licenses/>.
 #
 from django.core.exceptions import ValidationError
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import serializers, viewsets
+from rest_framework import serializers
 
 from pretix.api.serializers.i18n import I18nAwareModelSerializer
 from pretix.api.views.plugin_rule_viewset import BasePluginRuleViewSet
 from pretix.base.models import ItemVariation, SalesChannel
 from pretix.plugins.autocheckin.models import AutoCheckinRule
-from pretix.plugins.sendmail.models import Rule
 
 
 class AutoCheckinRuleSerializer(I18nAwareModelSerializer):

@@ -20,7 +20,7 @@
 # <https://www.gnu.org/licenses/>.
 #
 from django.core.exceptions import ValidationError
-from django_filters.rest_framework import DjangoFilterBackend, FilterSet
+from django_filters.rest_framework import FilterSet
 from django_scopes import scopes_disabled
 
 from pretix.api.serializers.i18n import I18nAwareModelSerializer
