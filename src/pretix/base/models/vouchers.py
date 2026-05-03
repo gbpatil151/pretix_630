@@ -336,7 +336,7 @@ class Voucher(LoggedModel):
         )
 
     @staticmethod
-    def clean_item_properties(data, event, quota, item, variation, block_quota=False, _seats_given=False):
+    def clean_item_properties(data, event, quota, item, variation, block_quota=False, seats_given=False):
         if quota:
             if quota.event != event:
                 raise ValidationError(_('You cannot select a quota that belongs to a different event.'))

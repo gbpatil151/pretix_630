@@ -52,6 +52,7 @@ from pretix.base.forms.widgets import format_placeholders_help_text
 from pretix.base.i18n import language
 from pretix.base.models import Item, Voucher
 from pretix.control.forms import SplitDateTimeField, SplitDateTimePickerWidget
+from pretix.control.forms.filter import drop_optional_subevent_field
 from pretix.control.forms.widgets import Select2, Select2ItemVarQuota
 from pretix.control.signals import voucher_form_validation
 from pretix.helpers.models import modelcopy
@@ -119,8 +120,8 @@ class VoucherForm(I18nModelForm):
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
             self.fields['subevent'].required = False
-        elif 'subevent' in self.fields:
-            del self.fields['subevent']
+        else:
+            drop_optional_subevent_field(self)
 
         choices = []
         if 'itemvar' in initial or (self.data and 'itemvar' in self.data):

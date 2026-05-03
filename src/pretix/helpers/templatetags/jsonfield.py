@@ -54,7 +54,7 @@ class JSONExtract(Expression):
         c.source_expression = c.source_expression.resolve_expression(query, allow_joins, reuse, summarize, for_save)
         return c
 
-    def as_sql(self, compiler, connection, function=None, template=None, _arg_joiner=None, **extra_context):
+    def as_sql(self, compiler, connection, function=None, template=None, arg_joiner=None, **extra_context):
         if '.postgresql' in connection.settings_dict['ENGINE']:
             params = []
             arg_sql, arg_params = compiler.compile(self.source_expression)

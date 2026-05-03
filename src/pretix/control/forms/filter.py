@@ -142,6 +142,11 @@ def get_all_payment_providers():
     return choices
 
 
+def drop_optional_subevent_field(form):
+    if 'subevent' in form.fields:
+        del form.fields['subevent']
+
+
 class FilterForm(forms.Form):
     orders = {}
 
@@ -477,8 +482,8 @@ class EventOrderFilterForm(OrderFilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent' in self.fields:
-            del self.fields['subevent']
+        else:
+            drop_optional_subevent_field(self)
 
         choices = [('', _('All products'))]
         for i in self.event.items.prefetch_related('variations').all():
@@ -2302,8 +2307,8 @@ class VoucherFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent' in self.fields:
-            del self.fields['subevent']
+        else:
+            drop_optional_subevent_field(self)
 
         choices = [('', _('All products'))]
         for i in self.event.items.prefetch_related('variations').all():
@@ -2413,8 +2418,8 @@ class VoucherTagFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent' in self.fields:
-            del self.fields['subevent']
+        else:
+            drop_optional_subevent_field(self)
 
     def filter_qs(self, qs):
         fdata = self.cleaned_data
@@ -2514,8 +2519,8 @@ class OverviewFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent' in self.fields:
-            del self.fields['subevent']
+        else:
+            drop_optional_subevent_field(self)
 
 
 class CheckinFilterForm(FilterForm):
@@ -2711,8 +2716,8 @@ class CheckinListFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent' in self.fields:
-            del self.fields['subevent']
+        else:
+            drop_optional_subevent_field(self)
 
     def filter_qs(self, qs):
         fdata = self.cleaned_data
