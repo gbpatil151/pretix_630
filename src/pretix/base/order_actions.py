@@ -20,6 +20,7 @@
 # <https://www.gnu.org/licenses/>.
 #
 from django.utils.translation import gettext_lazy as _
+
 from pretix.base.logaction import LogActionType, log_action_mediator
 
 order_actions = [
