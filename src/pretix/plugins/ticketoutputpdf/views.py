@@ -45,7 +45,7 @@ from pretix.base.models import CachedFile, OrderPosition
 from pretix.base.pdf import Renderer
 from pretix.base.services.tickets import invalidate_cache
 from pretix.control.permissions import EventPermissionRequiredMixin
-from pretix.control.views.pdf import BaseEditorView
+from pretix.control.views.pdf import BaseEditorView, BaseLayoutEditorView, BaseOrderPrintDo
 from pretix.helpers.models import modelcopy
 from pretix.plugins.ticketoutputpdf.forms import TicketLayoutForm
 from pretix.plugins.ticketoutputpdf.ticketoutput import PdfTicketOutput
@@ -234,95 +234,32 @@ class LayoutGetDefault(EventPermissionRequiredMixin, View):
         }))
 
 
-class LayoutEditorView(BaseEditorView):
+class LayoutEditorView(BaseLayoutEditorView):
+    def get_layout_model(self):
+        return TicketLayout
 
-    @cached_property
-    def layout(self):
-        try:
-            return self.request.event.ticket_layouts.get(
-                id=self.kwargs['layout']
-            )
-        except TicketLayout.DoesNotExist:
-            raise Http404(_("The requested layout does not exist."))
+    def get_action_prefix(self):
+        return 'pretix.plugins.ticketoutputpdf'
+
+    def get_output_filename(self):
+        return 'ticket.pdf'
+
+    def get_render_background_title(self):
+        return 'Ticket'
 
     @property
     def title(self):
         return _('Ticket PDF layout: {}').format(self.layout)
 
-    def save_layout(self):
-        update_fields = ['layout']
-        self.layout.layout = self.request.POST.get("data")
-        if "name" in self.request.POST:
-            self.layout.name = self.request.POST.get("name")
-            update_fields.append('name')
-        self.layout.save(update_fields=update_fields)
-        self.layout.log_action(action='pretix.plugins.ticketoutputpdf.layout.changed', user=self.request.user,
-                               data={'layout': self.request.POST.get("data"), 'name': self.request.POST.get("name")})
+    def post_save_hook(self):
         invalidate_cache.apply_async(kwargs={'event': self.request.event.pk, 'provider': 'pdf'})
 
     def get_default_background(self):
         return static('pretixpresale/pdf/ticket_default_a4.pdf')
 
-    def generate(self, op: OrderPosition, override_layout=None, override_background=None):
-        Renderer._register_fonts(self.request.event)
 
-        buffer = BytesIO()
-        if override_background:
-            bgf = default_storage.open(override_background.name, "rb")
-        elif isinstance(self.layout.background, File) and self.layout.background.name:
-            bgf = default_storage.open(self.layout.background.name, "rb")
-        else:
-            bgf = open(finders.find('pretixpresale/pdf/ticket_default_a4.pdf'), "rb")
-        r = Renderer(
-            self.request.event,
-            override_layout or self.get_current_layout(),
-            bgf,
-        )
-        p = canvas.Canvas(buffer, pagesize=pagesizes.A4)
-        r.draw_page(p, op.order, op)
-        p.save()
-        outbuffer = r.render_background(buffer, 'Ticket')
-        return 'ticket.pdf', 'application/pdf', outbuffer.read()
-
-    def get_current_layout(self):
-        return json.loads(self.layout.layout)
-
-    def get_current_background(self):
-        return self.layout.background.url if self.layout.background else self.get_default_background()
-
-    def save_background(self, f: CachedFile):
-        if self.layout.background and TicketLayout.objects.filter(background=self.layout.background).count() == 1:
-            self.layout.background.delete()
-        self.layout.background.save('background.pdf', f.file)
-        invalidate_cache.apply_async(kwargs={'event': self.request.event.pk, 'provider': 'pdf'})
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx['name'] = self.layout.name
-        return ctx
-
-
-class OrderPrintDo(EventPermissionRequiredMixin, AsyncAction, View):
+class OrderPrintDo(BaseOrderPrintDo):
     task = tickets_create_pdf
-    permission = 'can_view_orders'
-    known_errortypes = ['OrderError', 'ExportError']
-
-    def get_success_message(self, value):
-        return None
-
-    def get_success_url(self, value):
-        return reverse('cachedfile.download', kwargs={'id': str(value)})
-
-    def get_error_url(self):
-        return reverse('control:event.index', kwargs={
-            'organizer': self.request.organizer.slug,
-            'event': self.request.event.slug,
-        })
-
-    def get_error_message(self, exception):
-        if isinstance(exception, str):
-            return exception
-        return super().get_error_message(exception)
 
     def post(self, request, *args, **kwargs):
         order = get_object_or_404(self.request.event.orders, code=request.GET.get("code"))

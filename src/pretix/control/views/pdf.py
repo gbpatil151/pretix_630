@@ -311,3 +311,111 @@ class PdfView(TemplateView):
         resp = FileResponse(cf.file, content_type='application/pdf')
         resp['Content-Disposition'] = 'attachment; filename="{}"'.format(cf.filename)
         return resp
+
+class BaseLayoutEditorView(BaseEditorView):
+    def get_layout_model(self):
+        raise NotImplementedError()
+
+    def get_action_prefix(self):
+        raise NotImplementedError()
+
+    def get_output_filename(self):
+        raise NotImplementedError()
+
+    def get_render_background_title(self):
+        raise NotImplementedError()
+
+    @cached_property
+    def layout(self):
+        try:
+            return self.get_layout_model().objects.get(
+                id=self.kwargs['layout']
+            )
+        except self.get_layout_model().DoesNotExist:
+            raise Http404(_("The requested layout does not exist."))
+
+    @property
+    def title(self):
+        return _('Layout: {}').format(self.layout)
+
+    def save_layout(self):
+        update_fields = ['layout']
+        self.layout.layout = self.request.POST.get("data")
+        if "name" in self.request.POST:
+            self.layout.name = self.request.POST.get("name")
+            update_fields.append('name')
+        self.layout.save(update_fields=update_fields)
+        self.layout.log_action(action=f'{self.get_action_prefix()}.layout.changed', user=self.request.user,
+                               data={'layout': self.request.POST.get("data"), 'name': self.request.POST.get("name")})
+        self.post_save_hook()
+
+    def post_save_hook(self):
+        pass
+
+    def get_current_layout(self):
+        return json.loads(self.layout.layout)
+
+    def get_current_background(self):
+        return self.layout.background.url if self.layout.background else self.get_default_background()
+
+    def save_background(self, f: CachedFile):
+        if self.layout.background and self.get_layout_model().objects.filter(background=self.layout.background).count() == 1:
+            self.layout.background.delete()
+        self.layout.background.save('background.pdf', f.file)
+        self.post_save_hook()
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['name'] = self.layout.name
+        return ctx
+
+    def generate(self, op: OrderPosition, override_layout=None, override_background=None):
+        from pretix.base.pdf import Renderer
+        # Using self.request.event to match ticket behavior, and badges also ignores the argument if not used
+        Renderer._register_fonts(getattr(self.request, 'event', None))
+
+        buffer = BytesIO()
+        if override_background:
+            bgf = default_storage.open(override_background.name, "rb")
+        elif isinstance(self.layout.background, File) and self.layout.background.name:
+            bgf = default_storage.open(self.layout.background.name, "rb")
+        else:
+            from django.contrib.staticfiles import finders
+            bgf = open(finders.find(self.get_default_background()), "rb")
+        r = Renderer(
+            self.request.event,
+            override_layout or self.get_current_layout(),
+            bgf,
+        )
+        from reportlab.pdfgen import canvas
+        from reportlab.lib import pagesizes
+        p = canvas.Canvas(buffer, pagesize=pagesizes.A4)
+        r.draw_page(p, op.order, op)
+        p.save()
+        outbuffer = r.render_background(buffer, self.get_render_background_title())
+        return self.get_output_filename(), 'application/pdf', outbuffer.read()
+
+from pretix.base.views.tasks import AsyncAction
+from django.views import View
+
+class BaseOrderPrintDo(EventPermissionRequiredMixin, AsyncAction, View):
+    permission = 'can_view_orders'
+    known_errortypes = ['OrderError', 'ExportError']
+
+    def get_success_message(self, value):
+        return None
+
+    def get_success_url(self, value):
+        return reverse('cachedfile.download', kwargs={'id': str(value)})
+
+    def get_error_url(self):
+        return reverse('control:event.index', kwargs={
+            'organizer': self.request.organizer.slug,
+            'event': self.request.event.slug,
+        })
+
+    def get_error_message(self, exception):
+        if isinstance(exception, str):
+            return exception
+        return super().get_error_message(exception)
+
