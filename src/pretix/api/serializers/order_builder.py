@@ -568,9 +568,9 @@ class OrderBuilder:
                     f.save()
 
         rounding_mode = self.validated_data.get("tax_rounding_mode")
-        if not rounding_mode and isinstance(self.context.get("auth"), Device):
+        if not rounding_mode and isinstance(self.ctx.get("auth"), Device):
             # Safety fallback to avoid differences in tax reporting
-            brand = self.context.get("auth").software_brand or ""
+            brand = self.ctx.get("auth").software_brand or ""
             if "pretixPOS" in brand or "pretixKIOSK" in brand:
                 rounding_mode = "line"
         if not rounding_mode:
@@ -603,6 +603,11 @@ class OrderBuilder:
 
     def process_payments(self):
         """Phase 6: Create payment objects, handle free/paid transitions. Returns the self.order."""
+        if self.simulate:
+            # attach_fees() replaces `.payments` with a list stub — skip real Payment rows
+            self.order.create_transactions(is_new=True, fees=self.fees, positions=self.pos_map.values())
+            return self.order
+
         if self.order.total == Decimal('0.00') and self.validated_data.get('status') == Order.STATUS_PAID and not self.payment_provider:
             self.payment_provider = 'free'
 
