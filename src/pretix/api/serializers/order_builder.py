@@ -1,5 +1,27 @@
 #
 # This file is part of pretix (Community Edition).
+#
+# Copyright (C) 2014-2020  Raphael Michel and contributors
+# Copyright (C) 2020-today pretix GmbH and contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+# Public License as published by the Free Software Foundation in version 3 of the License.
+#
+# ADDITIONAL TERMS APPLY: Pursuant to Section 7 of the GNU Affero General Public License, additional terms are
+# applicable granting you additional permissions and placing additional restrictions on your usage of this software.
+# Please refer to the pretix LICENSE file to obtain the full terms applicable to this work. If you did not receive
+# this file, see <https://pretix.eu/about/en/license>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
+# <https://www.gnu.org/licenses/>.
+#
+
+#
+# This file is part of pretix (Community Edition).
 # Extracted from OrderCreateSerializer.create() as part of Builder pattern refactoring.
 # See issue #61: Spaghetti Code in OrderSerializer.create -> refactor toward Builder
 #
@@ -15,14 +37,18 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 from decimal import Decimal
 
+from django.core.files import File
 from django.db.models import F, Q
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy
 from rest_framework.exceptions import ValidationError
 
+# Re-use helper classes from the serializer module
+from pretix.api.serializers.order import WrappedList, WrappedModel
 from pretix.base.decimal import round_decimal
 from pretix.base.models import (
-    Device, InvoiceAddress, Order, OrderPosition, Seat, Voucher,
+    Device, InvoiceAddress, Order, OrderPosition, QuestionAnswer, Seat,
+    Voucher,
 )
 from pretix.base.models.orders import CartPosition, OrderFee, OrderPayment
 from pretix.base.models.tax import TaxRule
@@ -33,11 +59,6 @@ from pretix.base.services.pricing import (
     is_included_for_free,
 )
 from pretix.base.services.quotas import QuotaAvailability
-from pretix.base.models import QuestionAnswer, ReusableMedium
-from django.core.files import File
-
-# Re-use helper classes from the serializer module
-from pretix.api.serializers.order import WrappedModel, WrappedList
 
 
 class OrderBuilder:
@@ -94,62 +115,62 @@ class OrderBuilder:
         self.now_dt = now()
 
     def extract_data(self):
-        """Phase 1: Pop nested data from validated_data and set up invoice address."""
-        fees_data = validated_data.pop('fees') if 'fees' in validated_data else []
-        positions_data = validated_data.pop('positions') if 'positions' in validated_data else []
-        payment_provider = validated_data.pop('payment_provider', None)
-        payment_info = validated_data.pop('payment_info', '{}')
-        payment_date = validated_data.pop('payment_date', now())
-        force = validated_data.pop('force', False)
-        simulate = validated_data.pop('simulate', False)
-        
-        if not validated_data.get("sales_channel"):
-            validated_data["sales_channel"] = self.event.organizer.sales_channels.get(identifier="web")
-        
-        if validated_data.get("testmode") and not validated_data["sales_channel"].type_instance.testmode_supported:
+        """Phase 1: Pop nested data from self.validated_data and set up invoice address."""
+        self.fees_data = self.validated_data.pop('fees') if 'fees' in self.validated_data else []
+        self.positions_data = self.validated_data.pop('positions') if 'positions' in self.validated_data else []
+        self.payment_provider = self.validated_data.pop('payment_provider', None)
+        self.payment_info = self.validated_data.pop('payment_info', '{}')
+        self.payment_date = self.validated_data.pop('payment_date', now())
+        self.force = self.validated_data.pop('force', False)
+        self.simulate = self.validated_data.pop('simulate', False)
+
+        if not self.validated_data.get("sales_channel"):
+            self.validated_data["sales_channel"] = self.event.organizer.sales_channels.get(identifier="web")
+
+        if self.validated_data.get("testmode") and not self.validated_data["sales_channel"].type_instance.testmode_supported:
             raise ValidationError({"testmode": ["This sales channel does not provide support for test mode."]})
-        
-        self._send_mail = validated_data.pop('send_email', False)
+
+        self._send_mail = self.validated_data.pop('send_email', False)
         if self._send_mail is None:
-            self._send_mail = validated_data["sales_channel"].identifier in self.event.settings.mail_sales_channel_placed_paid
-        
-        if 'invoice_address' in validated_data:
-            iadata = validated_data.pop('invoice_address')
+            self._send_mail = self.validated_data["sales_channel"].identifier in self.event.settings.mail_sales_channel_placed_paid
+
+        if 'invoice_address' in self.validated_data:
+            iadata = self.validated_data.pop('invoice_address')
             name = iadata.pop('name', '')
             if name and not iadata.get('name_parts'):
                 iadata['name_parts'] = {
                     '_legacy': name
                 }
-            ia = InvoiceAddress(**iadata)
+            self.ia = InvoiceAddress(**iadata)
         else:
-            ia = None
-        
-        quotas_by_item = {}
-        quota_diff_for_locking = Counter()
-        voucher_diff_for_locking = Counter()
-        seat_diff_for_locking = Counter()
-        quota_usage = Counter()
-        voucher_usage = Counter()
-        seat_usage = Counter()
-        v_budget = {}
-        now_dt = now()
-        delete_cps = []
-        consume_carts = validated_data.pop('consume_carts', [])
+            self.ia = None
+
+        self.quotas_by_item = {}
+        self.quota_diff_for_locking = Counter()
+        self.voucher_diff_for_locking = Counter()
+        self.seat_diff_for_locking = Counter()
+        self.quota_usage = Counter()
+        self.voucher_usage = Counter()
+        self.seat_usage = Counter()
+        self.v_budget = {}
+        self.now_dt = now()
+        self.delete_cps = []
+        self.consume_carts = self.validated_data.pop('consume_carts', [])
 
     def build_resource_diffs(self):
         """Phase 2: Build quota/voucher/seat diff counters from positions."""
-        
-        for pos_data in positions_data:
-            if (pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')) not in quotas_by_item:
-                quotas_by_item[pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')] = list(
+
+        for pos_data in self.positions_data:
+            if (pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')) not in self.quotas_by_item:
+                self.quotas_by_item[pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')] = list(
                     pos_data.get('variation').quotas.filter(subevent=pos_data.get('subevent'))
                     if pos_data.get('variation')
                     else pos_data.get('item').quotas.filter(subevent=pos_data.get('subevent'))
                 )
-            for q in quotas_by_item[pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')]:
-                quota_diff_for_locking[q] += 1
+            for q in self.quotas_by_item[pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')]:
+                self.quota_diff_for_locking[q] += 1
             if pos_data.get('voucher'):
-                voucher_diff_for_locking[pos_data['voucher']] += 1
+                self.voucher_diff_for_locking[pos_data['voucher']] += 1
             if pos_data.get('seat'):
                 try:
                     seat = self.event.seats.get(seat_guid=pos_data['seat'], subevent=pos_data.get('subevent'))
@@ -157,135 +178,135 @@ class OrderBuilder:
                     pos_data['seat'] = Seat.DoesNotExist
                 else:
                     pos_data['seat'] = seat
-                    seat_diff_for_locking[pos_data['seat']] += 1
-        
-        if consume_carts:
+                    self.seat_diff_for_locking[pos_data['seat']] += 1
+
+        if self.consume_carts:
             offset = now() + timedelta(seconds=LOCK_TRUST_WINDOW)
             for cp in CartPosition.objects.filter(
-                event=self.event, cart_id__in=consume_carts, expires__gt=now_dt
+                event=self.event, cart_id__in=self.consume_carts, expires__gt=self.now_dt
             ):
                 quotas = (cp.variation.quotas.filter(subevent=cp.subevent)
                           if cp.variation else cp.item.quotas.filter(subevent=cp.subevent))
                 for quota in quotas:
                     if cp.expires > offset:
-                        quota_diff_for_locking[quota] -= 1
-                    quota_usage[quota] -= 1
+                        self.quota_diff_for_locking[quota] -= 1
+                    self.quota_usage[quota] -= 1
                 if cp.voucher:
                     if cp.expires > offset:
-                        voucher_diff_for_locking[cp.voucher] -= 1
-                    voucher_usage[cp.voucher] -= 1
+                        self.voucher_diff_for_locking[cp.voucher] -= 1
+                    self.voucher_usage[cp.voucher] -= 1
                 if cp.seat:
                     if cp.expires > offset:
-                        seat_diff_for_locking[cp.seat] -= 1
-                    seat_usage[cp.seat] -= 1
-                delete_cps.append(cp)
-        
-        if not simulate:
-            full_lock_required = seat_diff_for_locking and self.event.settings.seating_minimal_distance > 0
+                        self.seat_diff_for_locking[cp.seat] -= 1
+                    self.seat_usage[cp.seat] -= 1
+                self.delete_cps.append(cp)
+
+        if not self.simulate:
+            full_lock_required = self.seat_diff_for_locking and self.event.settings.seating_minimal_distance > 0
             if full_lock_required:
                 # We lock the entire event in this case since we don't want to deal with fine-granular locking
                 # in the case of seating distance enforcement
                 lock_objects([self.event])
             else:
                 lock_objects(
-                    [q for q, d in quota_diff_for_locking.items() if d > 0 and q.size is not None and not force] +
-                    [v for v, d in voucher_diff_for_locking.items() if d > 0 and not force] +
-                    [s for s, d in seat_diff_for_locking.items() if d > 0],
+                    [q for q, d in self.quota_diff_for_locking.items() if d > 0 and q.size is not None and not self.force] +
+                    [v for v, d in self.voucher_diff_for_locking.items() if d > 0 and not self.force] +
+                    [s for s, d in self.seat_diff_for_locking.items() if d > 0],
                     shared_lock_objects=[self.event]
                 )
-        
+
         qa = QuotaAvailability()
-        qa.queue(*[q for q, d in quota_diff_for_locking.items() if d > 0])
+        qa.queue(*[q for q, d in self.quota_diff_for_locking.items() if d > 0])
         qa.compute()
-        
+
         # These are not technically correct as diff use due to the time offset applied above, so let's prevent accidental
         # use further down
-        del quota_diff_for_locking, voucher_diff_for_locking, seat_diff_for_locking
+        del self.quota_diff_for_locking, self.voucher_diff_for_locking, self.seat_diff_for_locking
 
     def lock_and_validate(self):
         """Phase 3: Acquire locks, check quotas, vouchers, seats, validity."""
-        if not simulate:
-            full_lock_required = seat_diff_for_locking and self.event.settings.seating_minimal_distance > 0
+        if not self.simulate:
+            full_lock_required = self.seat_diff_for_locking and self.event.settings.seating_minimal_distance > 0
             if full_lock_required:
                 # We lock the entire event in this case since we don't want to deal with fine-granular locking
                 # in the case of seating distance enforcement
                 lock_objects([self.event])
             else:
                 lock_objects(
-                    [q for q, d in quota_diff_for_locking.items() if d > 0 and q.size is not None and not force] +
-                    [v for v, d in voucher_diff_for_locking.items() if d > 0 and not force] +
-                    [s for s, d in seat_diff_for_locking.items() if d > 0],
+                    [q for q, d in self.quota_diff_for_locking.items() if d > 0 and q.size is not None and not self.force] +
+                    [v for v, d in self.voucher_diff_for_locking.items() if d > 0 and not self.force] +
+                    [s for s, d in self.seat_diff_for_locking.items() if d > 0],
                     shared_lock_objects=[self.event]
                 )
-        
+
         qa = QuotaAvailability()
-        qa.queue(*[q for q, d in quota_diff_for_locking.items() if d > 0])
+        qa.queue(*[q for q, d in self.quota_diff_for_locking.items() if d > 0])
         qa.compute()
-        
+
         # These are not technically correct as diff use due to the time offset applied above, so let's prevent accidental
         # use further down
-        del quota_diff_for_locking, voucher_diff_for_locking, seat_diff_for_locking
-        
-        errs = [{} for p in positions_data]
-        
-        for i, pos_data in enumerate(positions_data):
+        del self.quota_diff_for_locking, self.voucher_diff_for_locking, self.seat_diff_for_locking
+
+        errs = [{} for p in self.positions_data]
+
+        for i, pos_data in enumerate(self.positions_data):
             if pos_data.get('voucher'):
                 v = pos_data['voucher']
-        
+
                 if pos_data.get('addon_to'):
                     errs[i]['voucher'] = ['Vouchers are currently not supported for add-on products.']
                     continue
-        
+
                 if not v.applies_to(pos_data['item'], pos_data.get('variation')):
                     errs[i]['voucher'] = [error_messages['voucher_invalid_item']]
                     continue
-        
+
                 if v.subevent_id and pos_data.get('subevent').pk != v.subevent_id:
                     errs[i]['voucher'] = [error_messages['voucher_invalid_subevent']]
                     continue
-        
-                if v.valid_until is not None and v.valid_until < now_dt:
+
+                if v.valid_until is not None and v.valid_until < self.now_dt:
                     errs[i]['voucher'] = [error_messages['voucher_expired']]
                     continue
-        
-                voucher_usage[v] += 1
-                if voucher_usage[v] > 0:
+
+                self.voucher_usage[v] += 1
+                if self.voucher_usage[v] > 0:
                     redeemed_in_carts = CartPosition.objects.filter(
-                        Q(voucher=pos_data['voucher']) & Q(event=self.event) & Q(expires__gte=now_dt)
-                    ).exclude(pk__in=[cp.pk for cp in delete_cps])
+                        Q(voucher=pos_data['voucher']) & Q(event=self.event) & Q(expires__gte=self.now_dt)
+                    ).exclude(pk__in=[cp.pk for cp in self.delete_cps])
                     v_avail = v.max_usages - v.redeemed - redeemed_in_carts.count()
-                    if v_avail < voucher_usage[v]:
+                    if v_avail < self.voucher_usage[v]:
                         errs[i]['voucher'] = [
                             'The voucher has already been used the maximum number of times.'
                         ]
-        
+
                 if v.budget is not None:
                     price = pos_data.get('price')
                     listed_price = get_listed_price(pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent'))
-        
+
                     if pos_data.get('voucher'):
                         price_after_voucher = pos_data.get('voucher').calculate_price(listed_price)
                     else:
                         price_after_voucher = listed_price
                     if price is None:
                         price = price_after_voucher
-        
-                    if v not in v_budget:
-                        v_budget[v] = v.budget - v.budget_used()
+
+                    if v not in self.v_budget:
+                        self.v_budget[v] = v.budget - v.budget_used()
                     disc = max(listed_price - price, 0)
-                    if disc > v_budget[v]:
-                        new_disc = v_budget[v]
-                        v_budget[v] -= new_disc
+                    if disc > self.v_budget[v]:
+                        new_disc = self.v_budget[v]
+                        self.v_budget[v] -= new_disc
                         if new_disc == Decimal('0.00') or pos_data.get('price') is not None:
                             errs[i]['voucher'] = [
                                 'The voucher has a remaining budget of {}, therefore a discount of {} can not be '
-                                'given.'.format(v_budget[v] + new_disc, disc)
+                                'given.'.format(self.v_budget[v] + new_disc, disc)
                             ]
                             continue
                         pos_data['price'] = price + (disc - new_disc)
                     else:
-                        v_budget[v] -= disc
-        
+                        self.v_budget[v] -= disc
+
             seated = pos_data.get('item').seat_category_mappings.filter(subevent=pos_data.get('subevent')).exists()
             if pos_data.get('seat'):
                 if pos_data.get('addon_to'):
@@ -297,13 +318,13 @@ class OrderBuilder:
                 if seat is Seat.DoesNotExist:
                     errs[i]['seat'] = ['The specified seat does not exist.']
                 else:
-                    seat_usage[seat] += 1
-                    sales_channel_id = validated_data['sales_channel'].identifier
-                    if (seat_usage[seat] > 0 and not seat.is_available(sales_channel=sales_channel_id)) or seat_usage[seat] > 1:
+                    self.seat_usage[seat] += 1
+                    sales_channel_id = self.validated_data['sales_channel'].identifier
+                    if (self.seat_usage[seat] > 0 and not seat.is_available(sales_channel=sales_channel_id)) or self.seat_usage[seat] > 1:
                         errs[i]['seat'] = [gettext_lazy('The selected seat "{seat}" is not available.').format(seat=seat.name)]
             elif seated:
                 errs[i]['seat'] = ['The specified product requires to choose a seat.']
-        
+
             requested_valid_from = pos_data.pop('requested_valid_from', None)
             if 'valid_from' not in pos_data and 'valid_until' not in pos_data:
                 valid_from, valid_until = pos_data['item'].compute_validity(
@@ -317,13 +338,13 @@ class OrderBuilder:
                 )
                 pos_data['valid_from'] = valid_from
                 pos_data['valid_until'] = valid_until
-        
-        if not force:
-            for i, pos_data in enumerate(positions_data):
+
+        if not self.force:
+            for i, pos_data in enumerate(self.positions_data):
                 if pos_data.get('voucher'):
                     if pos_data['voucher'].allow_ignore_quota or pos_data['voucher'].block_quota:
                         continue
-        
+
                 if pos_data.get('subevent'):
                     if pos_data.get('item').pk in pos_data['subevent'].item_overrides and pos_data['subevent'].item_overrides[pos_data['item'].pk].disabled:
                         errs[i]['item'] = [gettext_lazy('The product "{}" is not available on this date.').format(
@@ -336,56 +357,56 @@ class OrderBuilder:
                         errs[i]['item'] = [gettext_lazy('The product "{}" is not available on this date.').format(
                             str(pos_data.get('item'))
                         )]
-        
-                new_quotas = quotas_by_item[pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')]
+
+                new_quotas = self.quotas_by_item[pos_data.get('item'), pos_data.get('variation'), pos_data.get('subevent')]
                 if len(new_quotas) == 0:
                     errs[i]['item'] = [gettext_lazy('The product "{}" is not assigned to a quota.').format(
                         str(pos_data.get('item'))
                     )]
                 else:
                     for quota in new_quotas:
-                        quota_usage[quota] += 1
-                        if quota_usage[quota] > 0 and qa.results[quota][1] is not None:
-                            if qa.results[quota][1] < quota_usage[quota]:
+                        self.quota_usage[quota] += 1
+                        if self.quota_usage[quota] > 0 and qa.results[quota][1] is not None:
+                            if qa.results[quota][1] < self.quota_usage[quota]:
                                 errs[i]['item'] = [
                                     gettext_lazy('There is not enough quota available on quota "{}" to perform the operation.').format(
                                         quota.name
                                     )
                                 ]
-        
+
         if any(errs):
             raise ValidationError({'positions': errs})
 
     def create_order_and_positions(self):
         """Phase 4: Create Order and OrderPosition objects, compute prices, save."""
-        if validated_data.get('locale', None) is None:
-            validated_data['locale'] = self.event.settings.locale
-        
-        order = Order(event=self.event, **validated_data)
-        if not validated_data.get('expires'):
-            order.set_expires(subevents=[p.get('subevent') for p in positions_data])
-        order.meta_info = "{}"
-        order.total = Decimal('0.00')
-        if validated_data.get('require_approval') is not None:
-            order.require_approval = validated_data['require_approval']
-        if simulate:
-            order = WrappedModel(order)
-            order.last_modified = now()
-            order.code = 'PREVIEW'
+        if self.validated_data.get('locale', None) is None:
+            self.validated_data['locale'] = self.event.settings.locale
+
+        self.order = Order(event=self.event, **self.validated_data)
+        if not self.validated_data.get('expires'):
+            self.order.set_expires(subevents=[p.get('subevent') for p in self.positions_data])
+        self.order.meta_info = "{}"
+        self.order.total = Decimal('0.00')
+        if self.validated_data.get('require_approval') is not None:
+            self.order.require_approval = self.validated_data['require_approval']
+        if self.simulate:
+            self.order = WrappedModel(self.order)
+            self.order.last_modified = now()
+            self.order.code = 'PREVIEW'
         else:
-            order.save()
-        
-        if ia:
-            if not simulate:
-                ia.order = order
-                ia.save()
+            self.order.save()
+
+        if self.ia:
+            if not self.simulate:
+                self.ia.order = self.order
+                self.ia.save()
             else:
-                order.invoice_address = ia
-                ia.last_modified = now()
-        
+                self.order.invoice_address = self.ia
+                self.ia.last_modified = now()
+
         # Generate position objects
-        pos_map = {}
-        for pos_data in positions_data:
+        self.pos_map = {}
+        for pos_data in self.positions_data:
             addon_to = pos_data.pop('addon_to', None)
             attendee_name = pos_data.pop('attendee_name', '')
             if attendee_name and not pos_data.get('attendee_name_parts'):
@@ -393,39 +414,39 @@ class OrderBuilder:
                     '_legacy': attendee_name
                 }
             pos = OrderPosition(**{k: v for k, v in pos_data.items() if k != 'answers' and k != '_quotas' and k != 'use_reusable_medium'})
-            if simulate:
-                pos.order = order._wrapped
+            if self.simulate:
+                pos.order = self.order._wrapped
             else:
-                pos.order = order
+                pos.order = self.order
             if addon_to:
-                if simulate:
-                    pos.addon_to = pos_map[addon_to]
+                if self.simulate:
+                    pos.addon_to = self.pos_map[addon_to]
                 else:
-                    pos.addon_to = pos_map[addon_to]
-        
-            pos_map[pos.positionid] = pos
+                    pos.addon_to = self.pos_map[addon_to]
+
+            self.pos_map[pos.positionid] = pos
             pos_data['__instance'] = pos
-        
+
         # Calculate prices if not set
-        for pos_data in positions_data:
+        for pos_data in self.positions_data:
             pos = pos_data['__instance']
             if pos.addon_to_id and is_included_for_free(pos.item, pos.addon_to):
                 listed_price = Decimal('0.00')
             else:
                 listed_price = get_listed_price(pos.item, pos.variation, pos.subevent)
-        
+
             if pos.price is None:
                 if pos.voucher:
                     price_after_voucher = pos.voucher.calculate_price(listed_price)
                 else:
                     price_after_voucher = listed_price
-        
+
                 line_price = get_line_price(
                     price_after_voucher=price_after_voucher,
                     custom_price_input=None,
                     custom_price_input_is_net=False,
                     tax_rule=pos.item.tax_rule,
-                    invoice_address=ia,
+                    invoice_address=self.ia,
                     bundled_sum=Decimal('0.00'),
                 )
                 pos.price = line_price.gross
@@ -435,7 +456,7 @@ class OrderBuilder:
                     if not pos.item.tax_rule or pos.item.tax_rule.price_includes_tax:
                         price_after_voucher = max(pos.price, pos.voucher.calculate_price(listed_price))
                     else:
-                        pos._calculate_tax(invoice_address=ia)
+                        pos._calculate_tax(invoice_address=self.ia)
                         price_after_voucher = max(pos.price - pos.tax_value, pos.voucher.calculate_price(listed_price))
                 else:
                     price_after_voucher = listed_price
@@ -443,14 +464,14 @@ class OrderBuilder:
             pos._voucher_discount = listed_price - price_after_voucher
             if pos.voucher:
                 pos.voucher_budget_use = max(listed_price - price_after_voucher, Decimal('0.00'))
-        
-        order_positions = [pos_data['__instance'] for pos_data in positions_data]
-        if not any([p.get("discount") for p in positions_data]):
+
+        order_positions = [pos_data['__instance'] for pos_data in self.positions_data]
+        if not any([p.get("discount") for p in self.positions_data]):
             # If any discount is set by the client (i.e. pretixPOS), we do not recalculate but believe the client
             # to avoid differences in end results.
             discount_results = apply_discounts(
                 self.event,
-                order.sales_channel,
+                self.order.sales_channel,
                 [
                     (cp.item_id, cp.subevent_id, cp.subevent.date_from if cp.subevent_id else None, cp.price,
                      cp.addon_to, cp.is_bundled, pos._voucher_discount)
@@ -461,15 +482,15 @@ class OrderBuilder:
                 if new_price != pos.price and pos._auto_generated_price:
                     pos.price = new_price
                 pos.discount = discount
-        
+
         # Save instances
-        for pos_data in positions_data:
+        for pos_data in self.positions_data:
             answers_data = pos_data.pop('answers', [])
             use_reusable_medium = pos_data.pop('use_reusable_medium', None)
             pos = pos_data['__instance']
-            pos._calculate_tax(invoice_address=ia)
-        
-            if simulate:
+            pos._calculate_tax(invoice_address=self.ia)
+
+            if self.simulate:
                 pos = WrappedModel(pos)
                 pos.id = 0
                 answers = []
@@ -482,7 +503,7 @@ class OrderBuilder:
                 pos.pseudonymization_id = "PREVIEW"
                 pos.checkins = []
                 pos.print_logs = []
-                pos_map[pos.positionid] = pos
+                self.pos_map[pos.positionid] = pos
             else:
                 if pos.voucher:
                     Voucher.objects.filter(pk=pos.voucher.pk).update(redeemed=F('redeemed') + 1)
@@ -493,9 +514,9 @@ class OrderBuilder:
                     if answ_data.get('question') in seen_answers:
                         continue
                     seen_answers.add(answ_data.get('question'))
-        
+
                     options = answ_data.pop('options', [])
-        
+
                     if isinstance(answ_data['answer'], File):
                         an = answ_data.pop('answer')
                         answ = pos.answers.create(**answ_data, answer='')
@@ -505,79 +526,78 @@ class OrderBuilder:
                     else:
                         answ = pos.answers.create(**answ_data)
                         answ.options.add(*options)
-        
+
                 if use_reusable_medium:
                     use_reusable_medium.linked_orderposition = pos
                     use_reusable_medium.save(update_fields=['linked_orderposition'])
                     use_reusable_medium.log_action(
                         'pretix.reusable_medium.linked_orderposition.changed',
                         data={
-                            'by_order': order.code,
+                            'by_order': self.order.code,
                             'linked_orderposition': pos.pk,
                         }
                     )
-        
 
     def attach_fees(self):
         """Phase 5: Create OrderFee objects, apply tax rounding, update total."""
-        if not simulate:
-            for cp in delete_cps:
+        if not self.simulate:
+            for cp in self.delete_cps:
                 if cp.addon_to_id:
                     continue
                 cp.addons.all().delete()
                 cp.delete()
-        
-        order.total = sum([p.price for p in pos_map.values()])
-        fees = []
-        for fee_data in fees_data:
+
+        self.order.total = sum([p.price for p in self.pos_map.values()])
+        self.fees = []
+        for fee_data in self.fees_data:
             is_percentage = fee_data.pop('_treat_value_as_percentage', False)
             if is_percentage:
-                fee_data['value'] = round_decimal(order.total * (fee_data['value'] / Decimal('100.00')),
+                fee_data['value'] = round_decimal(self.order.total * (fee_data['value'] / Decimal('100.00')),
                                                   self.event.currency)
             is_split_taxes = fee_data.pop('_split_taxes_like_products', False)
-        
-            if is_split_taxes and order.total:
+
+            if is_split_taxes and self.order.total:
                 d = defaultdict(lambda: Decimal('0.00'))
                 trz = TaxRule.zero()
-                for p in pos_map.values():
+                for p in self.pos_map.values():
                     tr = p.tax_rule
                     d[tr] += p.price - p.tax_value
-        
+
                 base_values = sorted([tuple(t) for t in d.items()], key=lambda t: (t[0] or trz).rate)
                 sum_base = sum(t[1] for t in base_values)
                 fee_values = [(t[0], round_decimal(fee_data['value'] * t[1] / sum_base, self.event.currency))
                               for t in base_values]
                 sum_fee = sum(t[1] for t in fee_values)
-        
+
                 # If there are rounding differences, we fix them up, but always leaning to the benefit of the tax
                 # authorities
                 if sum_fee > fee_data['value']:
                     fee_values[0] = (fee_values[0][0], fee_values[0][1] + (fee_data['value'] - sum_fee))
                 elif sum_fee < fee_data['value']:
                     fee_values[-1] = (fee_values[-1][0], fee_values[-1][1] + (fee_data['value'] - sum_fee))
-        
+
                 for tr, val in fee_values:
                     fee_data['tax_rule'] = tr
                     fee_data['value'] = val
                     f = OrderFee(**fee_data)
-                    f.order = order._wrapped if simulate else order
+                    f.order = self.order._wrapped if self.simulate else self.order
                     f._calculate_tax()
-                    fees.append(f)
-                    if simulate:
+                    self.fees.append(f)
+                    if self.simulate:
                         f.id = 0
                     else:
                         f.save()
             else:
                 f = OrderFee(**fee_data)
-                f.order = order._wrapped if simulate else order
+                f.order = self.order._wrapped if self.simulate else self.order
                 f._calculate_tax()
-                fees.append(f)
-                if simulate:
+                self.fees.append(f)
+                if self.simulate:
                     f.id = 0
                 else:
                     f.save()
-        
-        rounding_mode = validated_data.get("tax_rounding_mode")
+
+        rounding_mode = self.validated_data.get("tax_rounding_mode")
         if not rounding_mode:
             if isinstance(self.context.get("auth"), Device):
                 # Safety fallback to avoid differences in tax reporting
@@ -588,9 +608,9 @@ class OrderBuilder:
             rounding_mode = self.event.settings.tax_rounding
         changed = apply_rounding(
             rounding_mode,
-            ia,
+            self.ia,
             self.event.currency,
-            [*pos_map.values(), *fees]
+            [*self.pos_map.values(), *self.fees]
         )
         for line in changed:
             if isinstance(line, OrderPosition):
@@ -601,54 +621,53 @@ class OrderBuilder:
                 line.save(update_fields=[
                     "value", "value_includes_rounding_correction", "tax_value", "tax_value_includes_rounding_correction"
                 ])
-        
-        order.total = sum([c.price for c in pos_map.values()]) + sum([f.value for f in fees])
-        if simulate:
-            order.fees = fees
-            order.positions = pos_map.values()
-            order.payments = []
-            order.refunds = []
-            return order  # ignore payments
+
+        self.order.total = sum([c.price for c in self.pos_map.values()]) + sum([f.value for f in self.fees])
+        if self.simulate:
+            self.order.fees = self.fees
+            self.order.positions = self.pos_map.values()
+            self.order.payments = []
+            self.order.refunds = []
+            return self.order  # ignore payments
         else:
-            order.save(update_fields=['total'])
+            self.order.save(update_fields=['total'])
 
     def process_payments(self):
-        """Phase 6: Create payment objects, handle free/paid transitions. Returns the order."""
-        if order.total == Decimal('0.00') and validated_data.get('status') == Order.STATUS_PAID and not payment_provider:
-            payment_provider = 'free'
-        
-        if order.total != Decimal('0.00') and order.event.currency == "XXX":
+        """Phase 6: Create payment objects, handle free/paid transitions. Returns the self.order."""
+        if self.order.total == Decimal('0.00') and self.validated_data.get('status') == Order.STATUS_PAID and not self.payment_provider:
+            self.payment_provider = 'free'
+
+        if self.order.total != Decimal('0.00') and self.order.event.currency == "XXX":
             raise ValidationError('Paid products not supported without a valid currency.')
-        
-        if order.total == Decimal('0.00') and validated_data.get('status') != Order.STATUS_PAID and not validated_data.get('require_approval'):
-            order.status = Order.STATUS_PAID
-            order.save()
-            order.payments.create(
-                amount=order.total, provider='free', state=OrderPayment.PAYMENT_STATE_CONFIRMED,
+
+        if self.order.total == Decimal('0.00') and self.validated_data.get('status') != Order.STATUS_PAID and not self.validated_data.get('require_approval'):
+            self.order.status = Order.STATUS_PAID
+            self.order.save()
+            self.order.payments.create(
+                amount=self.order.total, provider='free', state=OrderPayment.PAYMENT_STATE_CONFIRMED,
                 payment_date=now()
             )
-        elif payment_provider == "free" and order.total != Decimal('0.00'):
+        elif self.payment_provider == "free" and self.order.total != Decimal('0.00'):
             raise ValidationError('You cannot use the "free" payment provider for non-free orders.')
-        elif validated_data.get('status') == Order.STATUS_PAID:
-            if not payment_provider:
-                raise ValidationError('You cannot create a paid order without a payment provider.')
-            if validated_data.get('require_approval'):
-                raise ValidationError('You cannot create a paid order that requires approval.')
-            order.payments.create(
-                amount=order.total,
-                provider=payment_provider,
-                info=payment_info,
-                payment_date=payment_date,
+        elif self.validated_data.get('status') == Order.STATUS_PAID:
+            if not self.payment_provider:
+                raise ValidationError('You cannot create a paid self.order without a payment provider.')
+            if self.validated_data.get('require_approval'):
+                raise ValidationError('You cannot create a paid self.order that requires approval.')
+            self.order.payments.create(
+                amount=self.order.total,
+                provider=self.payment_provider,
+                info=self.payment_info,
+                payment_date=self.payment_date,
                 state=OrderPayment.PAYMENT_STATE_CONFIRMED
             )
-        elif payment_provider:
-            order.payments.create(
-                amount=order.total,
-                provider=payment_provider,
-                info=payment_info,
+        elif self.payment_provider:
+            self.order.payments.create(
+                amount=self.order.total,
+                provider=self.payment_provider,
+                info=self.payment_info,
                 state=OrderPayment.PAYMENT_STATE_CREATED
             )
-        
-        order.create_transactions(is_new=True, fees=fees, positions=pos_map.values())
-        return order
 
+        self.order.create_transactions(is_new=True, fees=self.fees, positions=self.pos_map.values())
+        return self.order

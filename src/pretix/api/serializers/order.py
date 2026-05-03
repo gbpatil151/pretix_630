@@ -20,16 +20,11 @@
 # <https://www.gnu.org/licenses/>.
 #
 import logging
-import os
-from collections import Counter, defaultdict
-from datetime import timedelta
-from decimal import Decimal
+from collections import defaultdict
 
 import pycountry
 from django.conf import settings
-from django.core.files import File
 from django.db import models
-from django.db.models import F, Q
 from django.utils.encoding import force_str
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy
@@ -48,27 +43,18 @@ from pretix.api.serializers.item import (
     InlineItemVariationSerializer, ItemSerializer, QuestionSerializer,
 )
 from pretix.api.signals import order_api_details, orderposition_api_details
-from pretix.base.decimal import round_decimal
 from pretix.base.i18n import language
 from pretix.base.invoicing.transmission import get_transmission_types
 from pretix.base.models import (
-    CachedFile, Checkin, Customer, Device, Invoice, InvoiceAddress,
-    InvoiceLine, Item, ItemVariation, Order, OrderPosition, Question,
-    QuestionAnswer, ReusableMedium, SalesChannel, Seat, SubEvent, TaxRule,
-    Voucher,
+    CachedFile, Checkin, Customer, Invoice, InvoiceAddress, InvoiceLine, Item,
+    ItemVariation, Order, OrderPosition, Question, QuestionAnswer,
+    ReusableMedium, SalesChannel, Seat, SubEvent, TaxRule, Voucher,
 )
 from pretix.base.models.orders import (
-    BlockedTicketSecret, CartPosition, OrderFee, OrderPayment, OrderRefund,
-    PrintLog, RevokedTicketSecret, Transaction,
+    BlockedTicketSecret, OrderFee, OrderPayment, OrderRefund, PrintLog,
+    RevokedTicketSecret, Transaction,
 )
 from pretix.base.pdf import get_images, get_variables
-from pretix.base.services.cart import error_messages
-from pretix.base.services.locking import LOCK_TRUST_WINDOW, lock_objects
-from pretix.base.services.pricing import (
-    apply_discounts, apply_rounding, get_line_price, get_listed_price,
-    is_included_for_free,
-)
-from pretix.base.services.quotas import QuotaAvailability
 from pretix.base.settings import (
     COUNTRIES_WITH_STATE_IN_ADDRESS, ROUNDING_MODES,
 )
@@ -1297,7 +1283,6 @@ class OrderCreateSerializer(I18nAwareModelSerializer):
             raise ValidationError(errs)
         return data
 
-
     def create(self, validated_data):
         """Orchestrate order creation via the OrderBuilder (Builder pattern).
 
@@ -1330,7 +1315,6 @@ class OrderCreateSerializer(I18nAwareModelSerializer):
         self._send_mail = builder._send_mail
 
         return order
-
 
 
 class LinePositionField(serializers.IntegerField):
