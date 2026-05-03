@@ -315,6 +315,7 @@ class OrderChangedSplitFrom(OrderLogEntryType):
 
 
 from pretix.base.logaction import log_action_mediator
+
 _core_order_actions = {
     action.action_type: action.display_text
     for action in log_action_mediator.get_all().values()
@@ -344,6 +345,8 @@ _core_order_actions.update({
     'pretix.control.views.checkin.reverted': _('The check-in of position #{posid} on list "{list}" has been reverted.'),
     'pretix.event.checkin.reverted': _('The check-in of position #{posid} on list "{list}" has been reverted.'),
 })
+
+
 class CheckinErrorLogEntryType(OrderLogEntryType):
     def display(self, logentry: LogEntry, data):
         return self.display_plain(self.plain, logentry, data)

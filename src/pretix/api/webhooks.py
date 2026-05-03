@@ -290,17 +290,17 @@ class ParametrizedCustomerWebhookEvent(ParametrizedWebhookEvent):
 @receiver(register_webhook_events, dispatch_uid="base_register_default_webhook_events")
 def register_default_webhook_events(sender, **kwargs):
     from pretix.base.logaction import log_action_mediator
-    
+
     events = [
         ParametrizedOrderWebhookEvent(action.action_type, action.webhook_event)
         for action in log_action_mediator.get_all().values()
         if action.webhook_event and action.action_type.startswith('pretix.event.order.') and action.action_type != 'pretix.event.order.deleted'
     ]
-    
+
     deleted_action = log_action_mediator.get_action('pretix.event.order.deleted')
     if deleted_action and deleted_action.webhook_event:
         events.append(DeletedOrderWebhookEvent(deleted_action.action_type, deleted_action.webhook_event))
-        
+
     return tuple(events) + (
         ParametrizedOrderPositionCheckinWebhookEvent(
             'pretix.event.checkin',
