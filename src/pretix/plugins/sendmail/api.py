@@ -108,6 +108,7 @@ with scopes_disabled():
 class RuleViewSet(BasePluginRuleViewSet):
     """Sendmail plugin rule viewset – thin subclass of BasePluginRuleViewSet."""
 
+    queryset = Rule.objects.none()  # Required for DRF router basename detection
     serializer_class = RuleSerializer
     filterset_class = RuleFilter
 

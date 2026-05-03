@@ -103,6 +103,7 @@ class AutoCheckinRuleSerializer(I18nAwareModelSerializer):
 class RuleViewSet(BasePluginRuleViewSet):
     """Autocheckin plugin rule viewset – thin subclass of BasePluginRuleViewSet."""
 
+    queryset = AutoCheckinRule.objects.none()  # Required for DRF router basename detection
     serializer_class = AutoCheckinRuleSerializer
 
     def get_rule_model(self):
