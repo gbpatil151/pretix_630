@@ -60,3 +60,5 @@ from .seating import Seat, SeatCategoryMapping, SeatingPlan
 from .tax import TaxRule
 from .vouchers import Voucher
 from .waitinglist import WaitingListEntry
+
+from .order_actions import order_actions

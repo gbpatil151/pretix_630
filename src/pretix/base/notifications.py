@@ -226,77 +226,14 @@ class ParametrizedOrderNotificationType(NotificationType):
 
 @receiver(register_notification_types, dispatch_uid="base_register_default_notification_types")
 def register_default_notification_types(sender, **kwargs):
-    return (
+    from pretix.base.logaction import log_action_mediator
+    return tuple(
         ParametrizedOrderNotificationType(
             sender,
-            'pretix.event.order.placed',
-            _('New order placed'),
-            _('A new order has been placed: {order.code}'),
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.placed.require_approval',
-            _('New order requires approval'),
-            _('A new order has been placed that requires approval: {order.code}'),
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.paid',
-            _('Order marked as paid'),
-            _('Order {order.code} has been marked as paid.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.canceled',
-            _('Order canceled'),
-            _('Order {order.code} has been canceled.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.reactivated',
-            _('Order reactivated'),
-            _('Order {order.code} has been reactivated.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.expired',
-            _('Order expired'),
-            _('Order {order.code} has been marked as expired.'),
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.modified',
-            _('Order information changed'),
-            _('The ticket information of order {order.code} has been changed.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.contact.changed',
-            _('Order contact address changed'),
-            _('The contact address of order {order.code} has been changed.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.changed.*',
-            _('Order changed'),
-            _('Order {order.code} has been changed.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.overpaid',
-            _('Order has been overpaid'),
-            _('Order {order.code} has been overpaid.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.refund.created.externally',
-            _('External refund of payment'),
-            _('An external refund for {order.code} has occurred.')
-        ),
-        ParametrizedOrderNotificationType(
-            sender,
-            'pretix.event.order.refund.requested',
-            _('Refund requested'),
-            _('You have been requested to issue a refund for {order.code}.')
-        ),
+            action.action_type,
+            action.notification_type[0],
+            action.notification_type[1],
+        )
+        for action in log_action_mediator.get_all().values()
+        if action.notification_type and action.action_type.startswith('pretix.event.order.')
     )
