@@ -22,12 +22,14 @@
 
 from django import forms
 from django.conf import settings
-from django.core.exceptions import ValidationError
-from django.utils.translation import gettext_lazy as _
 from pytz import common_timezones
 
 from pretix.base.models import ScheduledEventExport
 from pretix.base.models.exports import ScheduledOrganizerExport
+from pretix.helpers.recipient_validation import make_recipient_validator
+
+# Factory Method: produce a single validator used by every recipient field.
+_validate_recipients = make_recipient_validator(max_count=25)
 
 
 class ScheduledEventExportForm(forms.ModelForm):
@@ -51,22 +53,13 @@ class ScheduledEventExportForm(forms.ModelForm):
         )
 
     def clean_mail_additional_recipients(self):
-        d = self.cleaned_data['mail_additional_recipients'].replace(' ', '')
-        if len(d.split(',')) > 25:
-            raise ValidationError(_('Please enter less than 25 recipients.'))
-        return d
+        return _validate_recipients(self.cleaned_data['mail_additional_recipients'])
 
     def clean_mail_additional_recipients_cc(self):
-        d = self.cleaned_data['mail_additional_recipients_cc'].replace(' ', '')
-        if len(d.split(',')) > 25:
-            raise ValidationError(_('Please enter less than 25 recipients.'))
-        return d
+        return _validate_recipients(self.cleaned_data['mail_additional_recipients_cc'])
 
     def clean_mail_additional_recipients_bcc(self):
-        d = self.cleaned_data['mail_additional_recipients_bcc'].replace(' ', '')
-        if len(d.split(',')) > 25:
-            raise ValidationError(_('Please enter less than 25 recipients.'))
-        return d
+        return _validate_recipients(self.cleaned_data['mail_additional_recipients_bcc'])
 
 
 class ScheduledOrganizerExportForm(forms.ModelForm):
@@ -94,10 +87,10 @@ class ScheduledOrganizerExportForm(forms.ModelForm):
         )
 
     def clean_mail_additional_recipients(self):
-        return self.cleaned_data['mail_additional_recipients'].replace(' ', '')
+        return _validate_recipients(self.cleaned_data['mail_additional_recipients'])
 
     def clean_mail_additional_recipients_cc(self):
-        return self.cleaned_data['mail_additional_recipients_cc'].replace(' ', '')
+        return _validate_recipients(self.cleaned_data['mail_additional_recipients_cc'])
 
     def clean_mail_additional_recipients_bcc(self):
-        return self.cleaned_data['mail_additional_recipients_bcc'].replace(' ', '')
+        return _validate_recipients(self.cleaned_data['mail_additional_recipients_bcc'])
