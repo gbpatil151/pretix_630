@@ -477,7 +477,7 @@ class EventOrderFilterForm(OrderFilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
+        elif 'subevent' in self.fields:
             del self.fields['subevent']
 
         choices = [('', _('All products'))]
@@ -2302,7 +2302,7 @@ class VoucherFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
+        elif 'subevent' in self.fields:
             del self.fields['subevent']
 
         choices = [('', _('All products'))]
@@ -2413,7 +2413,7 @@ class VoucherTagFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
+        elif 'subevent' in self.fields:
             del self.fields['subevent']
 
     def filter_qs(self, qs):
@@ -2514,7 +2514,7 @@ class OverviewFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
+        elif 'subevent' in self.fields:
             del self.fields['subevent']
 
 
@@ -2711,7 +2711,7 @@ class CheckinListFilterForm(FilterForm):
                 }
             )
             self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
+        elif 'subevent' in self.fields:
             del self.fields['subevent']
 
     def filter_qs(self, qs):

@@ -386,7 +386,7 @@ class MailSettingsPreview(OrganizerPermissionRequiredMixin, View):
 class OrganizerDisplaySettings(OrganizerDetailViewMixin, OrganizerPermissionRequiredMixin, View):
     permission = None
 
-    def get(self, request, *wargs, **kwargs):
+    def get(self, request, *_args, **kwargs):
         return redirect(reverse('control:organizer.edit', kwargs={
             'organizer': self.request.organizer.slug,
         }) + '#tab-0-3-open')

@@ -267,7 +267,7 @@ def _get_voucher_availability(event, voucher_use_diff, now_dt, exclude_position_
 
 def _check_position_constraints(
     event: Event, item: Item, variation: ItemVariation, voucher: Voucher, subevent: SubEvent,
-    seat: Seat, sales_channel: SalesChannel, already_in_cart: bool, cart_is_expired: bool, real_now_dt: datetime,
+    seat: Seat, sales_channel: SalesChannel, _already_in_cart: bool, _cart_is_expired: bool, real_now_dt: datetime,
     item_requires_seat: bool, is_addon: bool, is_bundled: bool,
 ):
     """

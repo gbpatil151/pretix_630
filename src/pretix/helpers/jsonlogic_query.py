@@ -31,32 +31,32 @@ logger = logging.getLogger(__name__)
 
 
 class Equal(Func):
-    arg_joiner = ' = '
+    _arg_joiner = ' = '
     arity = 2
     function = ''
     conditional = True
 
 
 class GreaterThan(Func):
-    arg_joiner = ' > '
+    _arg_joiner = ' > '
     arity = 2
     function = ''
 
 
 class GreaterEqualThan(Func):
-    arg_joiner = ' >= '
+    _arg_joiner = ' >= '
     arity = 2
     function = ''
 
 
 class LowerEqualThan(Func):
-    arg_joiner = ' <= '
+    _arg_joiner = ' <= '
     arity = 2
     function = ''
 
 
 class LowerThan(Func):
-    arg_joiner = ' < '
+    _arg_joiner = ' < '
     arity = 2
     function = ''
 
@@ -64,7 +64,7 @@ class LowerThan(Func):
 class InList(Func):
     arity = 2
 
-    def as_sql(self, compiler, connection, function=None, template=None, arg_joiner=None, **extra_context):
+    def as_sql(self, compiler, connection, function=None, template=None, _arg_joiner=None, **extra_context):
         connection.ops.check_expression_support(self)
 
         # This ignores the special case for databases which limit the number of
@@ -91,7 +91,7 @@ def tolerance(b, tol=None, sign=1):
 class PostgresIntervalToEpoch(Func):
     arity = 1
 
-    def as_sql(self, compiler, connection, function=None, template=None, arg_joiner=None, **extra_context):
+    def as_sql(self, compiler, connection, function=None, template=None, _arg_joiner=None, **extra_context):
         lhs, lhs_params = compiler.compile(self.source_expressions[0])
         return '(EXTRACT(epoch FROM (%s))::int)' % lhs, lhs_params
 

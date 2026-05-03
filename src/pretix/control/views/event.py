@@ -758,7 +758,7 @@ class DangerZone(EventPermissionRequiredMixin, TemplateView):
 
 
 class DisplaySettings(View):
-    def get(self, request, *wargs, **kwargs):
+    def get(self, request, *_args, **kwargs):
         return redirect(reverse('control:event.settings', kwargs={
             'organizer': self.request.event.organizer.slug,
             'event': self.request.event.slug

@@ -44,7 +44,7 @@ from pretix.base.timemachine import time_machine_now
 def get_price(item: Item, variation: ItemVariation = None,
               voucher: Voucher = None, custom_price: Decimal = None,
               subevent: SubEvent = None, custom_price_is_net: bool = False,
-              custom_price_is_tax_rate: Decimal = None,
+              _custom_price_is_tax_rate: Decimal = None,
               addon_to: AbstractPosition = None, invoice_address: InvoiceAddress = None,
               force_custom_price: bool = False, bundled_sum: Decimal = Decimal('0.00'),
               max_discount: Decimal = None, tax_rule=None) -> TaxedPrice:
