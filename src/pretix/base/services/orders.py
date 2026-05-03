@@ -37,26 +37,22 @@ import json
 import logging
 import operator
 import sys
-from collections import Counter, defaultdict, namedtuple
+from collections import Counter
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from functools import reduce
 from time import sleep
-from typing import List, Optional
+from typing import List
 
 from celery.exceptions import MaxRetriesExceededError
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import (
-    Count, Exists, F, IntegerField, Max, Min, OuterRef, Q, QuerySet, Sum,
-    Value,
-)
+from django.db.models import Exists, F, IntegerField, Min, OuterRef, Q, Value
 from django.db.models.functions import Coalesce, Greatest
 from django.db.transaction import get_connection
 from django.dispatch import receiver
-from django.utils.functional import cached_property
 from django.utils.timezone import make_aware, now
 from django.utils.translation import gettext as _, gettext_lazy, ngettext_lazy
 from django_scopes import scopes_disabled
@@ -67,17 +63,12 @@ from pretix.base.email import get_email_context
 from pretix.base.i18n import get_language_without_region, language
 from pretix.base.media import MEDIA_TYPES
 from pretix.base.models import (
-    CartPosition, Device, Event, GiftCard, Item, ItemVariation, Membership,
-    Order, OrderPayment, OrderPosition, Quota, Seat, SeatCategoryMapping, User,
-    Voucher,
+    CartPosition, Device, Event, GiftCard, Item, Order, OrderPayment,
+    OrderPosition, Quota, SeatCategoryMapping, User, Voucher,
 )
-from pretix.base.models.event import SubEvent
-from pretix.base.models.orders import (
-    BlockedTicketSecret, InvoiceAddress, OrderFee, OrderRefund,
-    generate_secret,
-)
+from pretix.base.models.orders import InvoiceAddress, OrderFee, OrderRefund
 from pretix.base.models.organizer import SalesChannel, TeamAPIToken
-from pretix.base.models.tax import TAXED_ZERO, TaxedPrice, TaxRule
+from pretix.base.models.tax import TaxRule
 from pretix.base.payment import GiftCardPayment, PaymentException
 from pretix.base.reldate import RelativeDateWrapper
 from pretix.base.secrets import assign_ticket_secret
@@ -94,21 +85,18 @@ from pretix.base.services.memberships import (
     create_membership, validate_memberships_in_order,
 )
 from pretix.base.services.pricing import (
-    apply_discounts, apply_rounding, get_listed_price, get_price,
+    apply_discounts, apply_rounding, get_listed_price,
 )
-from pretix.base.services.quotas import QuotaAvailability
-from pretix.base.services.tasks import ProfiledEventTask, ProfiledTask
+from pretix.base.services.tasks import ProfiledTask
 from pretix.base.services.tax import split_fee_for_taxes
 from pretix.base.signals import (
     order_approved, order_canceled, order_changed, order_denied, order_expired,
     order_expiry_changed, order_fee_calculation, order_paid, order_placed,
-    order_reactivated, order_split, order_valid_if_pending, periodic_task,
-    validate_order,
+    order_reactivated, order_valid_if_pending, periodic_task, validate_order,
 )
 from pretix.base.timemachine import time_machine_now, time_machine_now_assigned
 from pretix.celery_app import app
 from pretix.helpers import OF_SELF
-from pretix.helpers.models import modelcopy
 from pretix.helpers.periodic import minimum_interval
 from pretix.testutils.middleware import debugflags_var
 
@@ -1694,7 +1682,6 @@ def notify_user_changed_order(order, user=None, auth=None, invoices=[]):
         )
 
 
-from .order_change import OrderChangeManager
 def perform_order(self, event: Event, payments: List[dict], positions: List[str],
                   email: str=None, locale: str=None, address: int=None, meta_info: dict=None,
                   sales_channel: str='web', shown_total=None, customer=None, override_now_dt: datetime=None,
@@ -2084,3 +2071,4 @@ def signal_listener_issue_media(sender: Event, order: Order, **kwargs):
                         'customer': order.customer_id,
                     }
                 )
+from .order_change import OrderChangeManager  # noqa

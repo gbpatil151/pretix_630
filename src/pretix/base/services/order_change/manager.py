@@ -49,26 +49,23 @@ from django.utils.timezone import now
 from django.utils.translation import gettext_lazy, ngettext_lazy
 
 from pretix.base.models import (
-    Item, ItemVariation, Membership, Order,
-    OrderPayment, OrderPosition, Seat,
+    Item, ItemVariation, Membership, Order, OrderPayment, OrderPosition, Seat,
 )
 from pretix.base.models.event import SubEvent
-from pretix.base.models.orders import (
-    InvoiceAddress, OrderFee, OrderRefund,
-)
+from pretix.base.models.orders import InvoiceAddress, OrderFee, OrderRefund
 from pretix.base.models.tax import TAXED_ZERO, TaxedPrice, TaxRule
 from pretix.base.services.invoices import (
     invoice_transmission_separately, transmit_invoice,
 )
-from pretix.base.services.orders import OrderError, error_messages, notify_user_changed_order
+from pretix.base.services.order_change.executor import OrderOperationExecutor
+from pretix.base.services.order_change.fee_manager import OrderFeeManager
+from pretix.base.services.order_change.validators import OrderChangeValidator
+from pretix.base.services.orders import (
+    OrderError, error_messages, notify_user_changed_order,
+)
 from pretix.base.services.pricing import get_price
-
 from pretix.base.signals import order_changed
 from pretix.helpers import OF_SELF
-
-from pretix.base.services.order_change.validators import OrderChangeValidator
-from pretix.base.services.order_change.fee_manager import OrderFeeManager
-from pretix.base.services.order_change.executor import OrderOperationExecutor
 
 logger = logging.getLogger(__name__)
 

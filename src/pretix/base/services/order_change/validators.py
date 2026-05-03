@@ -40,15 +40,12 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
-from pretix.base.models import (
-    CartPosition, Order, OrderPayment, Quota,
-)
+from pretix.base.models import CartPosition, Order, OrderPayment, Quota
 from pretix.base.payment import PaymentException
 from pretix.base.services.locking import lock_objects
 from pretix.base.services.memberships import validate_memberships_in_order
 from pretix.base.services.orders import OrderError, error_messages
 from pretix.base.services.quotas import QuotaAvailability
-
 from pretix.base.signals import order_canceled
 
 

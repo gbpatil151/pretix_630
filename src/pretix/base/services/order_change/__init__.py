@@ -35,6 +35,7 @@ The ``OrderChangeManager`` class re-exported here is now a thin Facade that
 delegates to these collaborators while preserving the identical public API.
 """
 
-from pretix.base.services.order_change.manager import OrderChangeManager  # noqa: F401
+from pretix.base.services.order_change.manager import \
+    OrderChangeManager  # noqa: F401
 
 __all__ = ['OrderChangeManager']

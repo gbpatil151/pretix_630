@@ -1,8 +1,23 @@
 #
 # This file is part of pretix (Community Edition).
 #
-# Extracted from OrderChangeManager as part of the Facade pattern refactoring.
-# See issue #60: God Object in OrderChangeManager -> refactor toward Facade
+# Copyright (C) 2014-2020  Raphael Michel and contributors
+# Copyright (C) 2020-today pretix GmbH and contributors
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+# Public License as published by the Free Software Foundation in version 3 of the License.
+#
+# ADDITIONAL TERMS APPLY: Pursuant to Section 7 of the GNU Affero General Public License, additional terms are
+# applicable granting you additional permissions and placing additional restrictions on your usage of this software.
+# Please refer to the pretix LICENSE file to obtain the full terms applicable to this work. If you did not receive
+# this file, see <https://pretix.eu/about/en/license>.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
+# <https://www.gnu.org/licenses/>.
 #
 
 """
@@ -18,15 +33,12 @@ import json
 import logging
 from decimal import Decimal
 
-from django.db.models import Max
+from django.db.models import F, Max
 from django.db.models.functions import Greatest
-from django.db.models import F
 from django.utils.timezone import now
 from django.utils.translation import gettext as _
 
-from pretix.base.models import (
-    Order, OrderPayment, OrderPosition, Voucher,
-)
+from pretix.base.models import Order, OrderPayment, OrderPosition, Voucher
 from pretix.base.models.orders import (
     BlockedTicketSecret, InvoiceAddress, OrderFee, OrderRefund,
     generate_secret,
@@ -34,7 +46,10 @@ from pretix.base.models.orders import (
 from pretix.base.secrets import assign_ticket_secret
 from pretix.base.services import tickets
 from pretix.base.services.invoices import generate_invoice
-from pretix.base.services.orders import OrderError, _calculate_voucher_budget_use, _reverse_issued_gift_cards_for_line
+from pretix.base.services.orders import (
+    OrderError, _calculate_voucher_budget_use,
+    _reverse_issued_gift_cards_for_line,
+)
 from pretix.base.services.pricing import apply_rounding
 from pretix.base.signals import order_split
 from pretix.helpers.models import modelcopy
@@ -454,7 +469,9 @@ class OrderOperationExecutor:
         split_order.code = None
         split_order.datetime = now()
         split_order.secret = generate_secret()
-        split_order.require_approval = self._ctx.order.require_approval and any(p.requires_approval(invoice_address=self._ctx._invoice_address) for p in split_positions)
+        split_order.require_approval = self._ctx.order.require_approval and any(
+            p.requires_approval(invoice_address=self._ctx._invoice_address) for p in split_positions
+        )
         split_order.save()
         split_order.log_action('pretix.event.order.changed.split_from', user=self._ctx.user, auth=self._ctx.auth, data={
             'original_order': self._ctx.order.code
