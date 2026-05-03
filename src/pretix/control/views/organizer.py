@@ -130,7 +130,7 @@ from pretix.control.permissions import (
     organizer_permission_required,
 )
 from pretix.control.signals import nav_organizer
-from pretix.control.views import PaginationMixin
+from pretix.control.views import PaginationMixin, RedirectOnGetView
 from pretix.control.views.mailsetup import MailSettingsSetupView
 from pretix.helpers import OF_SELF, GroupConcat
 from pretix.helpers.compat import CompatDeleteView
@@ -383,13 +383,14 @@ class MailSettingsPreview(OrganizerPermissionRequiredMixin, View):
         })
 
 
-class OrganizerDisplaySettings(OrganizerDetailViewMixin, OrganizerPermissionRequiredMixin, View):
+class OrganizerDisplaySettings(RedirectOnGetView, OrganizerDetailViewMixin, OrganizerPermissionRequiredMixin):
     permission = None
+    redirect_fragment = '#tab-0-3-open'
 
-    def get(self, request, *_args, **kwargs):
-        return redirect(reverse('control:organizer.edit', kwargs={
+    def get_redirect_target(self) -> str:
+        return reverse('control:organizer.edit', kwargs={
             'organizer': self.request.organizer.slug,
-        }) + '#tab-0-3-open')
+        })
 
 
 class OrganizerDelete(AdministratorPermissionRequiredMixin, FormView):

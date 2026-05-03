@@ -94,6 +94,7 @@ from pretix.control.forms.event import (
     TicketSettingsForm, WidgetCodeForm,
 )
 from pretix.control.permissions import EventPermissionRequiredMixin
+from pretix.control.views import RedirectOnGetView
 from pretix.control.views.mailsetup import MailSettingsSetupView
 from pretix.control.views.user import RecentAuthenticationRequiredMixin
 from pretix.helpers.database import rolledback_transaction
@@ -757,12 +758,14 @@ class DangerZone(EventPermissionRequiredMixin, TemplateView):
     template_name = 'pretixcontrol/event/dangerzone.html'
 
 
-class DisplaySettings(View):
-    def get(self, request, *_args, **kwargs):
-        return redirect(reverse('control:event.settings', kwargs={
+class DisplaySettings(RedirectOnGetView):
+    redirect_fragment = '#tab-0-3-open'
+
+    def get_redirect_target(self) -> str:
+        return reverse('control:event.settings', kwargs={
             'organizer': self.request.event.organizer.slug,
-            'event': self.request.event.slug
-        }) + '#tab-0-3-open')
+            'event': self.request.event.slug,
+        })
 
 
 class MailSettings(EventSettingsViewMixin, EventSettingsFormView):

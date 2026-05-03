@@ -25,8 +25,21 @@ import warnings
 from django.core.paginator import (
     EmptyPage, PageNotAnInteger, UnorderedObjectListWarning,
 )
+from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy as _
-from django.views.generic import edit
+from django.views.generic import View, edit
+
+
+class RedirectOnGetView(View):
+    """Redirects a GET request to :py:meth:`get_redirect_target` plus optional fragment."""
+
+    redirect_fragment = ''
+
+    def get_redirect_target(self) -> str:
+        raise NotImplementedError
+
+    def get(self, request, *_args, **kwargs):
+        return redirect(self.get_redirect_target() + self.redirect_fragment)
 
 
 class EventBasedFormMixin:

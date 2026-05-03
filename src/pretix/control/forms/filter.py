@@ -194,6 +194,9 @@ class FilterForm(forms.Form):
         else:
             return self.orders[o]
 
+    def setup_subevent_filter_widget(self):
+        configure_subevent_field_select2(self, self.event, with_date_placeholder=True)
+
     def filter_to_strings(self):
         string = []
         for k, f in self.fields.items():
@@ -489,7 +492,7 @@ class EventOrderFilterForm(OrderFilterForm):
         self.fields['provider'].choices += [(k, v.verbose_name) for k, v
                                             in self.event.get_payment_providers().items()]
 
-        configure_subevent_field_select2(self, self.event, with_date_placeholder=True)
+        self.setup_subevent_filter_widget()
 
         choices = [('', _('All products'))]
         for i in self.event.items.prefetch_related('variations').all():
@@ -2300,7 +2303,7 @@ class VoucherFilterForm(FilterForm):
         self.event = kwargs.pop('event')
         super().__init__(*args, **kwargs)
 
-        configure_subevent_field_select2(self, self.event, with_date_placeholder=True)
+        self.setup_subevent_filter_widget()
 
         choices = [('', _('All products'))]
         for i in self.event.items.prefetch_related('variations').all():
@@ -2397,7 +2400,7 @@ class VoucherTagFilterForm(FilterForm):
         self.event = kwargs.pop('event')
         super().__init__(*args, **kwargs)
 
-        configure_subevent_field_select2(self, self.event, with_date_placeholder=True)
+        self.setup_subevent_filter_widget()
 
     def filter_qs(self, qs):
         fdata = self.cleaned_data
@@ -2484,7 +2487,7 @@ class OverviewFilterForm(FilterForm):
         self.event = kwargs.pop('event')
         super().__init__(*args, **kwargs)
 
-        configure_subevent_field_select2(self, self.event, with_date_placeholder=True)
+        self.setup_subevent_filter_widget()
 
 
 class CheckinFilterForm(FilterForm):
@@ -2667,7 +2670,7 @@ class CheckinListFilterForm(FilterForm):
     def __init__(self, *args, **kwargs):
         self.event = kwargs.pop("event")
         super().__init__(*args, **kwargs)
-        configure_subevent_field_select2(self, self.event, with_date_placeholder=True)
+        self.setup_subevent_filter_widget()
 
     def filter_qs(self, qs):
         fdata = self.cleaned_data

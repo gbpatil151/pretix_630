@@ -53,7 +53,7 @@ from pretix.base.i18n import language
 from pretix.base.models import Item, Voucher
 from pretix.control.forms import SplitDateTimeField, SplitDateTimePickerWidget
 from pretix.control.forms.filter import configure_subevent_field_select2
-from pretix.control.forms.widgets import Select2, Select2ItemVarQuota
+from pretix.control.forms.widgets import Select2ItemVarQuota
 from pretix.control.signals import voucher_form_validation
 from pretix.helpers.models import modelcopy
 
