@@ -379,7 +379,6 @@ class PaidMarker(Flowable):
         self.canv.roundRect(-width - self.size / 2, -self.size / 4, width + self.size, self.size + self.size / 4, 3)
 
 
-
 class InvoiceSectionStrategy(ABC):
     """
     Strategy for one part of the classic invoice PDF story (pretix_630 #66).

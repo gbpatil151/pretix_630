@@ -45,6 +45,7 @@ recursive-include src *.svg
 recursive-include src *.txt
 recursive-include src Makefile
 
+recursive-include docs *.csv
 recursive-include docs *.md
 recursive-exclude doc *
 recursive-exclude deployment *
