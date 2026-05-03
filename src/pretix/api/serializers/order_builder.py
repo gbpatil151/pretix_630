@@ -601,11 +601,17 @@ class OrderBuilder:
         else:
             self.order.save(update_fields=['total'])
 
+    def _bare_order_positions(self):
+        """True OrderPosition instances for Transaction.key(); unwrap WrappedModel previews."""
+        return tuple(getattr(p, '_wrapped', p) for p in self.pos_map.values())
+
     def process_payments(self):
         """Phase 6: Create payment objects, handle free/paid transitions. Returns the self.order."""
         if self.simulate:
             # attach_fees() replaces `.payments` with a list stub — skip real Payment rows
-            self.order.create_transactions(is_new=True, fees=self.fees, positions=self.pos_map.values())
+            self.order.create_transactions(
+                is_new=True, fees=self.fees, positions=self._bare_order_positions()
+            )
             return self.order
 
         if self.order.total == Decimal('0.00') and self.validated_data.get('status') == Order.STATUS_PAID and not self.payment_provider:
@@ -625,9 +631,9 @@ class OrderBuilder:
             raise ValidationError('You cannot use the "free" payment provider for non-free orders.')
         elif self.validated_data.get('status') == Order.STATUS_PAID:
             if not self.payment_provider:
-                raise ValidationError('You cannot create a paid self.order without a payment provider.')
+                raise ValidationError('You cannot create a paid order without a payment provider.')
             if self.validated_data.get('require_approval'):
-                raise ValidationError('You cannot create a paid self.order that requires approval.')
+                raise ValidationError('You cannot create a paid order that requires approval.')
             self.order.payments.create(
                 amount=self.order.total,
                 provider=self.payment_provider,
@@ -643,5 +649,5 @@ class OrderBuilder:
                 state=OrderPayment.PAYMENT_STATE_CREATED
             )
 
-        self.order.create_transactions(is_new=True, fees=self.fees, positions=self.pos_map.values())
+        self.order.create_transactions(is_new=True, fees=self.fees, positions=self._bare_order_positions())
         return self.order
