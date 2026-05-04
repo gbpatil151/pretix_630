@@ -143,6 +143,31 @@ def get_all_payment_providers():
     return _PAYMENT_PROVIDER_REGISTRY.get_or_create()
 
 
+def drop_optional_subevent_field(form):
+    if 'subevent' in form.fields:
+        del form.fields['subevent']
+
+
+def configure_subevent_field_select2(form, event, *, with_date_placeholder=False, after_widget=None):
+    if not event.has_subevents:
+        drop_optional_subevent_field(form)
+        return
+    form.fields['subevent'].queryset = event.subevents.all()
+    attrs = {
+        'data-model-select2': 'event',
+        'data-select2-url': reverse('control:event.subevents.select2', kwargs={
+            'event': event.slug,
+            'organizer': event.organizer.slug,
+        }),
+    }
+    if with_date_placeholder:
+        attrs['data-placeholder'] = pgettext_lazy('subevent', 'All dates')
+    form.fields['subevent'].widget = Select2(attrs=attrs)
+    form.fields['subevent'].widget.choices = form.fields['subevent'].choices
+    if after_widget:
+        after_widget()
+
+
 class FilterForm(forms.Form):
     orders = {}
 
@@ -169,6 +194,9 @@ class FilterForm(forms.Form):
             return '-' + self.orders[o[1:]]
         else:
             return self.orders[o]
+
+    def setup_subevent_filter_widget(self):
+        configure_subevent_field_select2(self, self.event, with_date_placeholder=True)
 
     def filter_to_strings(self):
         string = []
@@ -465,21 +493,7 @@ class EventOrderFilterForm(OrderFilterForm):
         self.fields['provider'].choices += [(k, v.verbose_name) for k, v
                                             in self.event.get_payment_providers().items()]
 
-        if self.event.has_subevents:
-            self.fields['subevent'].queryset = self.event.subevents.all()
-            self.fields['subevent'].widget = Select2(
-                attrs={
-                    'data-model-select2': 'event',
-                    'data-select2-url': reverse('control:event.subevents.select2', kwargs={
-                        'event': self.event.slug,
-                        'organizer': self.event.organizer.slug,
-                    }),
-                    'data-placeholder': pgettext_lazy('subevent', 'All dates')
-                }
-            )
-            self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
-            del self.fields['subevent']
+        self.setup_subevent_filter_widget()
 
         choices = [('', _('All products'))]
         for i in self.event.items.prefetch_related('variations').all():
@@ -2290,21 +2304,7 @@ class VoucherFilterForm(FilterForm):
         self.event = kwargs.pop('event')
         super().__init__(*args, **kwargs)
 
-        if self.event.has_subevents:
-            self.fields['subevent'].queryset = self.event.subevents.all()
-            self.fields['subevent'].widget = Select2(
-                attrs={
-                    'data-model-select2': 'event',
-                    'data-select2-url': reverse('control:event.subevents.select2', kwargs={
-                        'event': self.event.slug,
-                        'organizer': self.event.organizer.slug,
-                    }),
-                    'data-placeholder': pgettext_lazy('subevent', 'All dates')
-                }
-            )
-            self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
-            del self.fields['subevent']
+        self.setup_subevent_filter_widget()
 
         choices = [('', _('All products'))]
         for i in self.event.items.prefetch_related('variations').all():
@@ -2401,21 +2401,7 @@ class VoucherTagFilterForm(FilterForm):
         self.event = kwargs.pop('event')
         super().__init__(*args, **kwargs)
 
-        if self.event.has_subevents:
-            self.fields['subevent'].queryset = self.event.subevents.all()
-            self.fields['subevent'].widget = Select2(
-                attrs={
-                    'data-model-select2': 'event',
-                    'data-select2-url': reverse('control:event.subevents.select2', kwargs={
-                        'event': self.event.slug,
-                        'organizer': self.event.organizer.slug,
-                    }),
-                    'data-placeholder': pgettext_lazy('subevent', 'All dates')
-                }
-            )
-            self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
-            del self.fields['subevent']
+        self.setup_subevent_filter_widget()
 
     def filter_qs(self, qs):
         fdata = self.cleaned_data
@@ -2502,21 +2488,7 @@ class OverviewFilterForm(FilterForm):
         self.event = kwargs.pop('event')
         super().__init__(*args, **kwargs)
 
-        if self.event.has_subevents:
-            self.fields['subevent'].queryset = self.event.subevents.all()
-            self.fields['subevent'].widget = Select2(
-                attrs={
-                    'data-model-select2': 'event',
-                    'data-select2-url': reverse('control:event.subevents.select2', kwargs={
-                        'event': self.event.slug,
-                        'organizer': self.event.organizer.slug,
-                    }),
-                    'data-placeholder': pgettext_lazy('subevent', 'All dates')
-                }
-            )
-            self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
-            del self.fields['subevent']
+        self.setup_subevent_filter_widget()
 
 
 class CheckinFilterForm(FilterForm):
@@ -2699,21 +2671,7 @@ class CheckinListFilterForm(FilterForm):
     def __init__(self, *args, **kwargs):
         self.event = kwargs.pop("event")
         super().__init__(*args, **kwargs)
-        if self.event.has_subevents:
-            self.fields['subevent'].queryset = self.event.subevents.all()
-            self.fields['subevent'].widget = Select2(
-                attrs={
-                    'data-model-select2': 'event',
-                    'data-select2-url': reverse('control:event.subevents.select2', kwargs={
-                        'event': self.event.slug,
-                        'organizer': self.event.organizer.slug,
-                    }),
-                    'data-placeholder': pgettext_lazy('subevent', 'All dates')
-                }
-            )
-            self.fields['subevent'].widget.choices = self.fields['subevent'].choices
-        elif 'subevent':
-            del self.fields['subevent']
+        self.setup_subevent_filter_widget()
 
     def filter_qs(self, qs):
         fdata = self.cleaned_data
