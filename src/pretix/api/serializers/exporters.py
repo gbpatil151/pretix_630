@@ -29,6 +29,10 @@ from pretix.api.serializers.forms import form_field_to_serializer_field
 from pretix.base.exporter import OrganizerLevelExportMixin
 from pretix.base.models import ScheduledEventExport, ScheduledOrganizerExport
 from pretix.base.timeframes import SerializerDateFrameField
+from pretix.helpers.recipient_validation import make_recipient_validator
+
+# Factory Method: produce one validator reused across all three recipient fields.
+_validate_recipients = make_recipient_validator(max_count=25)
 
 
 class SerializerDescriptionField(serializers.Field):
@@ -139,22 +143,13 @@ class ScheduledExportSerializer(serializers.ModelSerializer):
         return attrs
 
     def validate_mail_additional_recipients(self, value):
-        d = value.replace(' ', '')
-        if len(d.split(',')) > 25:
-            raise ValidationError('Please enter less than 25 recipients.')
-        return d
+        return _validate_recipients(value, use_drf=True)
 
     def validate_mail_additional_recipients_cc(self, value):
-        d = value.replace(' ', '')
-        if len(d.split(',')) > 25:
-            raise ValidationError('Please enter less than 25 recipients.')
-        return d
+        return _validate_recipients(value, use_drf=True)
 
     def validate_mail_additional_recipients_bcc(self, value):
-        d = value.replace(' ', '')
-        if len(d.split(',')) > 25:
-            raise ValidationError('Please enter less than 25 recipients.')
-        return d
+        return _validate_recipients(value, use_drf=True)
 
 
 class ScheduledEventExportSerializer(ScheduledExportSerializer):

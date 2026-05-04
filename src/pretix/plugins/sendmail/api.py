@@ -20,12 +20,11 @@
 # <https://www.gnu.org/licenses/>.
 #
 from django.core.exceptions import ValidationError
-from django_filters.rest_framework import DjangoFilterBackend, FilterSet
+from django_filters.rest_framework import FilterSet
 from django_scopes import scopes_disabled
-from rest_framework import viewsets
 
-from pretix.api.pagination import TotalOrderingFilter
 from pretix.api.serializers.i18n import I18nAwareModelSerializer
+from pretix.api.views.plugin_rule_viewset import BasePluginRuleViewSet
 from pretix.base.models import Order
 from pretix.plugins.sendmail.models import Rule
 
@@ -106,42 +105,15 @@ with scopes_disabled():
                       'offset_to_event_end', 'offset_is_after', 'send_to', 'enabled']
 
 
-class RuleViewSet(viewsets.ModelViewSet):
-    queryset = Rule.objects.none()
+class RuleViewSet(BasePluginRuleViewSet):
+    """Sendmail plugin rule viewset – thin subclass of BasePluginRuleViewSet."""
+
+    queryset = Rule.objects.none()  # Required for DRF router basename detection
     serializer_class = RuleSerializer
-    filter_backends = (DjangoFilterBackend, TotalOrderingFilter)
     filterset_class = RuleFilter
-    ordering = ('id',)
-    ordering_fields = ('id',)
-    permission = 'can_change_event_settings'
 
-    def get_queryset(self):
-        return Rule.objects.filter(event=self.request.event)
+    def get_rule_model(self):
+        return Rule
 
-    def perform_create(self, serializer):
-        super().perform_create(serializer)
-        serializer.instance.log_action(
-            'pretix.plugins.sendmail.rule.added',
-            user=self.request.user,
-            auth=self.request.auth,
-            data=self.request.data
-
-        )
-
-    def perform_update(self, serializer):
-        super().perform_update(serializer)
-        serializer.instance.log_action(
-            'pretix.plugins.sendmail.rule.changed',
-            user=self.request.user,
-            auth=self.request.auth,
-            data=self.request.data
-        )
-
-    def perform_destroy(self, instance):
-        instance.log_action(
-            'pretix.plugins.sendmail.rule.deleted',
-            user=self.request.user,
-            auth=self.request.auth,
-            data=self.request.data
-        )
-        super().perform_destroy(instance)
+    def get_action_prefix(self):
+        return 'pretix.plugins.sendmail'

@@ -20,14 +20,12 @@
 # <https://www.gnu.org/licenses/>.
 #
 from django.core.exceptions import ValidationError
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import serializers, viewsets
+from rest_framework import serializers
 
-from pretix.api.pagination import TotalOrderingFilter
 from pretix.api.serializers.i18n import I18nAwareModelSerializer
+from pretix.api.views.plugin_rule_viewset import BasePluginRuleViewSet
 from pretix.base.models import ItemVariation, SalesChannel
 from pretix.plugins.autocheckin.models import AutoCheckinRule
-from pretix.plugins.sendmail.models import Rule
 
 
 class AutoCheckinRuleSerializer(I18nAwareModelSerializer):
@@ -102,46 +100,20 @@ class AutoCheckinRuleSerializer(I18nAwareModelSerializer):
         return super().save(event=self.context["request"].event)
 
 
-class RuleViewSet(viewsets.ModelViewSet):
-    queryset = Rule.objects.none()
-    serializer_class = AutoCheckinRuleSerializer
-    filter_backends = (DjangoFilterBackend, TotalOrderingFilter)
-    ordering = ("id",)
-    ordering_fields = ("id",)
-    permission = "can_change_event_settings"
+class RuleViewSet(BasePluginRuleViewSet):
+    """Autocheckin plugin rule viewset – thin subclass of BasePluginRuleViewSet."""
 
-    def get_queryset(self):
-        return AutoCheckinRule.objects.filter(event=self.request.event)
+    queryset = AutoCheckinRule.objects.none()  # Required for DRF router basename detection
+    serializer_class = AutoCheckinRuleSerializer
+
+    def get_rule_model(self):
+        return AutoCheckinRule
+
+    def get_action_prefix(self):
+        return 'pretix.plugins.autocheckin'
 
     def get_serializer_context(self):
         return {
             **super().get_serializer_context(),
             "event": self.request.event,
         }
-
-    def perform_create(self, serializer):
-        super().perform_create(serializer)
-        serializer.instance.log_action(
-            "pretix.plugins.autocheckin.rule.added",
-            user=self.request.user,
-            auth=self.request.auth,
-            data=self.request.data,
-        )
-
-    def perform_update(self, serializer):
-        super().perform_update(serializer)
-        serializer.instance.log_action(
-            "pretix.plugins.autocheckin.rule.changed",
-            user=self.request.user,
-            auth=self.request.auth,
-            data=self.request.data,
-        )
-
-    def perform_destroy(self, instance):
-        instance.log_action(
-            "pretix.plugins.autocheckin.rule.deleted",
-            user=self.request.user,
-            auth=self.request.auth,
-            data=self.request.data,
-        )
-        super().perform_destroy(instance)
