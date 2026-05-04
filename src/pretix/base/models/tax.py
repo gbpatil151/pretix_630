@@ -34,7 +34,6 @@ from django.utils.hashable import make_hashable
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _, pgettext, pgettext_lazy
 from i18nfield.fields import I18nCharField
-from i18nfield.strings import LazyI18nString
 
 from pretix.base.decimal import round_decimal
 from pretix.base.models.base import LoggedModel
@@ -449,15 +448,11 @@ class TaxRule(LoggedModel):
         return self.custom_rules and self.custom_rules != '[]'
 
     def tax_rate_for(self, invoice_address):
-        if not self._tax_applicable(invoice_address):
-            return Decimal('0.00')
-        if self.has_custom_rules:
-            rule = self.get_matching_rule(invoice_address)
-            if rule.get('action', 'vat') == 'block':
-                raise self.SaleNotAllowed()
-            if rule.get('action', 'vat') in ('vat', 'require_approval') and rule.get('rate') is not None:
-                return Decimal(rule.get('rate'))
-        return Decimal(self.rate)
+        from pretix.base.services.tax_strategy import (
+            get_tax_strategy,
+        )
+        strategy = get_tax_strategy(self)
+        return strategy.get_tax_rate(self, invoice_address)
 
     def tax(self, base_price, base_price_is='auto', currency=None, override_tax_rate=None, override_tax_code=None,
             invoice_address=None, subtract_from_gross=Decimal('0.00'), gross_price_is_tax_rate: Decimal = None,
@@ -568,45 +563,42 @@ class TaxRule(LoggedModel):
         return {'action': 'vat'}
 
     def invoice_text(self, invoice_address):
-        if self._custom_rules:
-            rule = self.get_matching_rule(invoice_address)
-            t = rule.get('invoice_text', {})
-            if t and any(l for l in t.values()):
-                return str(LazyI18nString(t))
+        from pretix.base.services.tax_strategy import (
+            get_tax_strategy,
+        )
+        strategy = get_tax_strategy(self)
+        text = strategy.get_invoice_text(
+            self, invoice_address
+        )
+        if text:
+            return text
+        # Fallback: if strategy didn't produce text but
+        # reverse charge applies via the legacy path,
+        # generate the standard reverse charge text.
         if self.is_reverse_charge(invoice_address):
             if is_eu_country(invoice_address.country):
                 return pgettext(
                     "invoice",
-                    "Reverse Charge: According to Article 194, 196 of Council Directive 2006/112/EEC, VAT liability "
-                    "rests with the service recipient."
+                    "Reverse Charge: According to Article "
+                    "194, 196 of Council Directive "
+                    "2006/112/EEC, VAT liability rests with "
+                    "the service recipient."
                 )
             else:
                 return pgettext(
                     "invoice",
-                    "VAT liability rests with the service recipient."
+                    "VAT liability rests with the service "
+                    "recipient."
                 )
 
     def is_reverse_charge(self, invoice_address):
-        if self._custom_rules:
-            rule = self.get_matching_rule(invoice_address)
-            return rule['action'] == 'reverse'
-
-        if not self.eu_reverse_charge:
-            return False
-
-        if not invoice_address or not invoice_address.country:
-            return False
-
-        if not is_eu_country(invoice_address.country):
-            return False
-
-        if invoice_address.country == self.home_country:
-            return False
-
-        if invoice_address.is_business and invoice_address.vat_id and invoice_address.vat_id_validated:
-            return True
-
-        return False
+        from pretix.base.services.tax_strategy import (
+            get_tax_strategy,
+        )
+        strategy = get_tax_strategy(self)
+        return strategy.is_reverse_charge(
+            self, invoice_address
+        )
 
     def _require_approval(self, invoice_address):
         if self._custom_rules:
@@ -616,66 +608,20 @@ class TaxRule(LoggedModel):
         return False
 
     def tax_code_for(self, invoice_address):
-        if self._custom_rules:
-            rule = self.get_matching_rule(invoice_address)
-            if rule.get("code"):
-                return rule["code"]
-            if rule.get("action", "vat") == "reverse":
-                return "AE"
-            return self.code
-
-        if not self.eu_reverse_charge:
-            # No reverse charge rules? Always apply VAT!
-            return self.code
-
-        if not invoice_address or not invoice_address.country:
-            # No country specified? Always apply VAT!
-            return self.code
-
-        if not is_eu_country(invoice_address.country):
-            # Non-EU country? "Non-taxable" since not in scope
-            return "O"
-
-        if invoice_address.country == self.home_country:
-            # Within same EU country? Always apply VAT!
-            return self.code
-
-        if invoice_address.is_business and invoice_address.vat_id and invoice_address.vat_id_validated:
-            # Reverse charge case
-            return "AE"
-
-        # Consumer in different EU country / invalid VAT
-        return self.code
+        from pretix.base.services.tax_strategy import (
+            get_tax_strategy,
+        )
+        strategy = get_tax_strategy(self)
+        return strategy.get_tax_code(self, invoice_address)
 
     def _tax_applicable(self, invoice_address):
-        if self._custom_rules:
-            rule = self.get_matching_rule(invoice_address)
-            if rule.get('action', 'vat') == 'block':
-                raise self.SaleNotAllowed()
-            return rule.get('action', 'vat') in ('vat', 'require_approval')
-
-        if not self.eu_reverse_charge:
-            # No reverse charge rules? Always apply VAT!
-            return True
-
-        if not invoice_address or not invoice_address.country:
-            # No country specified? Always apply VAT!
-            return True
-
-        if not is_eu_country(invoice_address.country):
-            # Non-EU country? Never apply VAT!
-            return False
-
-        if invoice_address.country == self.home_country:
-            # Within same EU country? Always apply VAT!
-            return True
-
-        if invoice_address.is_business and invoice_address.vat_id and invoice_address.vat_id_validated:
-            # Reverse charge case
-            return False
-
-        # Consumer in different EU country / invalid VAT
-        return True
+        from pretix.base.services.tax_strategy import (
+            get_tax_strategy,
+        )
+        strategy = get_tax_strategy(self)
+        return strategy.is_tax_applicable(
+            self, invoice_address
+        )
 
     def delete(self, *args, **kwargs):
         super().delete(*args, **kwargs)
