@@ -33,10 +33,8 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under the License.
 import dataclasses
-import hashlib
 import inspect
 import logging
-import mimetypes
 import os
 import re
 import smtplib
@@ -51,21 +49,17 @@ from zoneinfo import ZoneInfo
 
 import requests
 from celery import chain
-from celery.exceptions import MaxRetriesExceededError
 from django.conf import settings
-from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives, SafeMIMEMultipart
-from django.core.mail.message import SafeMIMEText
 from django.db import connection, transaction
 from django.db.models import Q
 from django.dispatch import receiver
 from django.template.loader import get_template
 from django.utils.html import escape
 from django.utils.timezone import now, override
-from django.utils.translation import gettext as _, pgettext
+from django.utils.translation import gettext as _
 from django_scopes import scopes_disabled
 from i18nfield.strings import LazyI18nString
-from text_unidecode import unidecode
 
 from pretix.base.email import ClassicMailRenderer
 from pretix.base.i18n import language
@@ -76,18 +70,13 @@ from pretix.base.models import (
 from pretix.base.models.mail import OutgoingMail
 from pretix.base.services.invoices import invoice_pdf_task
 from pretix.base.services.tasks import TransactionAwareTask
-from pretix.base.services.tickets import get_tickets_for_order
-from pretix.base.signals import (
-    email_filter, global_email_filter, periodic_task,
-)
+from pretix.base.signals import periodic_task
 from pretix.celery_app import app
 from pretix.helpers import OF_SELF
 from pretix.helpers.format import (
     FormattedString, PlainHtmlAlternativeString, SafeFormatter, format_map,
 )
-from pretix.helpers.hierarkey import clean_filename
 from pretix.multidomain.urlreverse import build_absolute_uri
-from pretix.presale.ical import get_private_icals
 
 logger = logging.getLogger('pretix.base.mail')
 INVALID_ADDRESS = 'invalid-pretix-mail-address'
@@ -444,369 +433,22 @@ def mail_send_task(self, **kwargs) -> bool:
     else:
         raise ValueError("Unknown arguments")
 
-    with transaction.atomic():
-        try:
-            outgoing_mail = OutgoingMail.objects.select_for_update(of=OF_SELF).get(pk=outgoing_mail)
-        except OutgoingMail.DoesNotExist:
-            logger.info(f"Ignoring job for non existing email {outgoing_mail.guid}")
-            return False
-        if outgoing_mail.status == OutgoingMail.STATUS_INFLIGHT:
-            logger.info(f"Ignoring job for inflight email {outgoing_mail.guid}")
-            return False
-        elif outgoing_mail.status not in (OutgoingMail.STATUS_AWAITING_RETRY, OutgoingMail.STATUS_QUEUED):
-            logger.info(f"Ignoring job for email {outgoing_mail.guid} in final state {outgoing_mail.status}")
-            return False
-        outgoing_mail.status = OutgoingMail.STATUS_INFLIGHT
-        outgoing_mail.inflight_since = now()
-        outgoing_mail.save(update_fields=["status", "inflight_since"])
-
-    headers = dict(outgoing_mail.headers)
-    headers.setdefault('X-PX-Correlation', str(outgoing_mail.guid))
-    email = CustomEmail(
-        subject=outgoing_mail.subject,
-        body=outgoing_mail.body_plain,
-        from_email=outgoing_mail.sender,
-        to=outgoing_mail.to,
-        cc=outgoing_mail.cc,
-        bcc=outgoing_mail.bcc,
-        headers=headers,
+    from pretix.base.services.mail_commands import (
+        MAIL_SEND_PIPELINE, MailSendContext,
     )
 
-    # Rewrite all <img> tags from real URLs or data URLs to inline attachments referred to by content ID
-    if outgoing_mail.body_html is not None:
-        html_message = SafeMIMEMultipart(_subtype='related', encoding=settings.DEFAULT_CHARSET)
-        html_with_cid, cid_images = replace_images_with_cid_paths(outgoing_mail.body_html)
-        html_message.attach(SafeMIMEText(html_with_cid, 'html', settings.DEFAULT_CHARSET))
-        attach_cid_images(html_message, cid_images, verify_ssl=True)
-        email.attach_alternative(html_message, "multipart/related")
+    ctx = MailSendContext(
+        outgoing_mail_pk=outgoing_mail,
+        celery_task=self,
+    )
 
-    log_target, error_log_action_type = outgoing_mail.log_parameters()
-    invoices_attached = []
+    for cmd_class in MAIL_SEND_PIPELINE:
+        cmd = cmd_class()
+        result = cmd.execute(ctx)
+        if result is not None:
+            # Command signaled early return (e.g. False for abort)
+            return result
 
-    with outgoing_mail.scope_manager():
-        # Attach tickets
-        if outgoing_mail.should_attach_tickets and outgoing_mail.order:
-            with language(outgoing_mail.order.locale, outgoing_mail.event.settings.region):
-                args = []
-                attach_size = 0
-                for name, ct in get_tickets_for_order(outgoing_mail.order, base_position=outgoing_mail.orderposition):
-                    try:
-                        content = ct.file.read()
-                        args.append((name, content, ct.type))
-                        attach_size += len(content)
-                    except Exception as e:
-                        # This sometimes fails e.g. with FileNotFoundError. We haven't been able to figure out
-                        # why (probably some race condition with ticket cache invalidation?), so retry later.
-                        try:
-                            logger.exception(f'Could not attach tickets to email {outgoing_mail.guid}, will retry')
-                            retry_after = 60
-                            outgoing_mail.error = "Tickets not ready"
-                            outgoing_mail.error_detail = str(e)
-                            outgoing_mail.sent = now()
-                            outgoing_mail.status = OutgoingMail.STATUS_AWAITING_RETRY
-                            outgoing_mail.retry_after = now() + timedelta(seconds=retry_after)
-                            outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "retry_after",
-                                                              "actual_attachments"])
-                            self.retry(max_retries=5, countdown=retry_after)
-                        except MaxRetriesExceededError:
-                            # Well then, something is really wrong, let's send it without attachment before we
-                            # don't send at all
-                            logger.exception(f'Too many retries attaching tickets to email {outgoing_mail.guid}, skip attachment')
-                            pass
-
-                if attach_size * 1.37 < settings.FILE_UPLOAD_MAX_SIZE_EMAIL_ATTACHMENT - 1024 * 1024:
-                    # Do not attach more than (limit - 1 MB) in tickets (1MB space for invoice, email itself, …),
-                    # it will bounce way too often.
-                    # 1 MB is the buffer for the rest of the email (text, invoice, calendar, pictures)
-                    # 1.37 is the factor for base64 encoding https://en.wikipedia.org/wiki/Base64
-                    for a in args:
-                        try:
-                            email.attach(*a)
-                        except:
-                            pass
-                else:
-                    outgoing_mail.order.log_action(
-                        'pretix.event.order.email.attachments.skipped',
-                        data={
-                            'subject': 'Attachments skipped',
-                            'message': 'Attachment have not been send because {} bytes are likely too large to arrive.'.format(attach_size),
-                            'recipient': '',
-                            'invoices': [],
-                        }
-                    )
-
-        # Attach calendar files
-        if outgoing_mail.should_attach_ical and outgoing_mail.order:
-            fname = re.sub('[^a-zA-Z0-9 ]', '-', unidecode(pgettext('attachment_filename', 'Calendar invite')))
-            icals = get_private_icals(
-                outgoing_mail.event,
-                [outgoing_mail.orderposition] if outgoing_mail.orderposition else outgoing_mail.order.positions.all()
-            )
-            for i, cal in enumerate(icals):
-                name = '{}{}.ics'.format(fname, f'-{i + 1}' if i > 0 else '')
-                content = cal.serialize()
-                mimetype = 'text/calendar'
-                email.attach(name, content, mimetype)
-
-        invoices_to_mark_transmitted = []
-        for inv in outgoing_mail.should_attach_invoices.all():
-            if inv.file:
-                try:
-                    # We try to give the invoice a more human-readable name, e.g. "Invoice_ABC-123.pdf" instead of
-                    # just "ABC-123.pdf", but we only do so if our currently selected language allows to do this
-                    # as ASCII text. For example, we would not want a "فاتورة_" prefix for our filename since this
-                    # has shown to cause deliverability problems of the email and deliverability wins.
-                    with language(outgoing_mail.order.locale if outgoing_mail.order else inv.locale, outgoing_mail.event.settings.region):
-                        filename = pgettext('invoice', 'Invoice {num}').format(num=inv.number).replace(' ', '_') + '.pdf'
-                    if not re.match("^[a-zA-Z0-9-_%./,&:# ]+$", filename):
-                        filename = inv.number.replace(' ', '_') + '.pdf'
-                    filename = re.sub("[^a-zA-Z0-9-_.]+", "_", filename)
-                    content = inv.file.file.read()
-                    with language(inv.order.locale):
-                        email.attach(
-                            filename,
-                            content,
-                            'application/pdf'
-                        )
-                    invoices_attached.append(inv)
-                except Exception:
-                    logger.exception(f'Could not attach invoice to email {outgoing_mail.guid}')
-                    pass
-                else:
-                    if inv.transmission_type == "email":
-                        # Mark invoice as sent when it was sent to the requested address *either* at the time of invoice
-                        # creation *or* as of right now.
-                        expected_recipients = [
-                            (inv.invoice_to_transmission_info or {}).get("transmission_email_address")
-                            or inv.order.email,
-                        ]
-                        try:
-                            expected_recipients.append(
-                                (inv.order.invoice_address.transmission_info or {}).get("transmission_email_address")
-                                or inv.order.email
-                            )
-                        except InvoiceAddress.DoesNotExist:
-                            pass
-                        expected_recipients = {e.lower() for e in expected_recipients if e}
-                        if any(t in expected_recipients for t in outgoing_mail.to):
-                            invoices_to_mark_transmitted.append(inv)
-
-        for fname in outgoing_mail.should_attach_other_files:
-            ftype, _ = mimetypes.guess_type(fname)
-            data = default_storage.open(fname).read()
-            try:
-                email.attach(
-                    clean_filename(os.path.basename(fname)),
-                    data,
-                    ftype
-                )
-            except:
-                logger.exception(f'Could not attach file to email {outgoing_mail.guid}')
-                pass
-
-        for cf in outgoing_mail.should_attach_cached_files.all():
-            if cf.file:
-                try:
-                    email.attach(
-                        cf.filename,
-                        cf.file.file.read(),
-                        cf.type,
-                    )
-                except:
-                    logger.exception(f'Could not attach file to email {outgoing_mail.guid}')
-                    pass
-
-        outgoing_mail.actual_attachments = [
-            {
-                "name": a[0],
-                "size": len(a[1]),
-                "type": a[2],
-            } for a in email.attachments
-        ]
-
-        try:
-            if outgoing_mail.event:
-                with outgoing_mail.scope_manager():
-                    email = email_filter.send_chained(
-                        sender=outgoing_mail.event,
-                        chain_kwarg_name='message',
-                        message=email,
-                        order=outgoing_mail.order,
-                        user=outgoing_mail.user,
-                        outgoing_mail=outgoing_mail,
-                    )
-
-            email = global_email_filter.send_chained(
-                sender=outgoing_mail.event,
-                chain_kwarg_name='message',
-                message=email,
-                user=outgoing_mail.user,
-                order=outgoing_mail.order,
-                organizer=outgoing_mail.organizer,
-                customer=outgoing_mail.customer,
-                outgoing_mail=outgoing_mail,
-            )
-        except WithholdMailException as e:
-            outgoing_mail.status = OutgoingMail.STATUS_WITHHELD
-            outgoing_mail.error = e.error
-            outgoing_mail.error_detail = e.error_detail
-            outgoing_mail.sent = now()
-            outgoing_mail.retry_after = None
-            outgoing_mail.actual_attachments = [
-                {
-                    "name": a[0],
-                    "size": len(a[1]),
-                    "type": a[2],
-                } for a in email.attachments
-            ]
-            outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "retry_after", "actual_attachments"])
-            logger.info(f"Email {outgoing_mail.guid} withheld")
-            return False
-
-        # Seems duplicate, but needs to be in this order since plugins might change this
-        outgoing_mail.actual_attachments = [
-            {
-                "name": a[0],
-                "size": len(a[1]),
-                "type": a[2],
-            } for a in email.attachments
-        ]
-        backend = outgoing_mail.get_mail_backend()
-        try:
-            backend.send_messages([email])
-        except Exception as e:
-            logger.exception(f'Error sending email {outgoing_mail.guid}')
-            retry_strategy = _retry_strategy(e)
-            err, err_detail = _format_error(e)
-
-            outgoing_mail.error = err
-            outgoing_mail.error_detail = err_detail
-            outgoing_mail.sent = now()
-
-            # Run retries
-            try:
-                if retry_strategy == "microsoft_concurrency" and settings.HAS_REDIS:
-                    from django_redis import get_redis_connection
-
-                    redis_key = "pretix_mail_retry_" + hashlib.sha1(f"{getattr(backend, 'username', '_')}@{getattr(backend, 'host', '_')}".encode()).hexdigest()
-                    rc = get_redis_connection("redis")
-                    cnt = rc.incr(redis_key)
-                    rc.expire(redis_key, 300)
-
-                    max_retries = 10
-                    retry_after = min(30 + cnt * 10, 1800)
-
-                    outgoing_mail.status = OutgoingMail.STATUS_AWAITING_RETRY
-                    outgoing_mail.retry_after = now() + timedelta(seconds=retry_after)
-                    outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "retry_after", "actual_attachments"])
-                    self.retry(max_retries=max_retries, countdown=retry_after)  # throws RetryException, ends function flow
-                elif retry_strategy in ("microsoft_concurrency", "quick"):
-                    max_retries = 5
-                    retry_after = [10, 30, 60, 300, 900, 900][self.request.retries]
-                    outgoing_mail.status = OutgoingMail.STATUS_AWAITING_RETRY
-                    outgoing_mail.retry_after = now() + timedelta(seconds=retry_after)
-                    outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "retry_after", "actual_attachments"])
-                    self.retry(max_retries=max_retries, countdown=retry_after)  # throws RetryException, ends function flow
-
-                elif retry_strategy == "slow":
-                    retry_after = [60, 300, 600, 1200, 1800, 1800][self.request.retries]
-                    outgoing_mail.status = OutgoingMail.STATUS_AWAITING_RETRY
-                    outgoing_mail.retry_after = now() + timedelta(seconds=retry_after)
-                    outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "retry_after", "actual_attachments"])
-                    self.retry(max_retries=5, countdown=retry_after)  # throws RetryException, ends function flow
-
-            except MaxRetriesExceededError:
-                for i in invoices_to_mark_transmitted:
-                    i.set_transmission_failed(provider="email_pdf", data={
-                        "reason": "exception",
-                        "exception": "{}, max retries exceeded".format(err),
-                        "detail": err_detail,
-                    })
-
-                if log_target:
-                    log_target.log_action(
-                        error_log_action_type,
-                        data={
-                            'subject': f'{err} (max retries exceeded)',
-                            'message': err_detail,
-                            'recipient': '',
-                            'invoices': [],
-                        }
-                    )
-
-                outgoing_mail.status = OutgoingMail.STATUS_FAILED
-                outgoing_mail.sent = now()
-                outgoing_mail.retry_after = None
-                outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "retry_after", "actual_attachments"])
-                return False
-
-            # If we reach this, it's a non-retryable error
-            outgoing_mail.status = OutgoingMail.STATUS_FAILED
-            outgoing_mail.sent = now()
-            outgoing_mail.retry_after = None
-            outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "retry_after", "actual_attachments"])
-            for i in invoices_to_mark_transmitted:
-                i.set_transmission_failed(provider="email_pdf", data={
-                    "reason": "exception",
-                    "exception": err,
-                    "detail": err_detail,
-                })
-            if log_target:
-                log_target.log_action(
-                    error_log_action_type,
-                    data={
-                        'subject': err,
-                        'message': err_detail,
-                        'recipient': '',
-                        'invoices': [],
-                    }
-                )
-            return False
-        else:
-            outgoing_mail.status = OutgoingMail.STATUS_SENT
-            outgoing_mail.error = None
-            outgoing_mail.error_detail = None
-            outgoing_mail.sent = now()
-            outgoing_mail.retry_after = None
-            outgoing_mail.save(update_fields=["status", "error", "error_detail", "sent", "actual_attachments", "retry_after"])
-            for i in invoices_to_mark_transmitted:
-                if i.transmission_status != Invoice.TRANSMISSION_STATUS_COMPLETED:
-                    i.transmission_date = now()
-                    i.transmission_status = Invoice.TRANSMISSION_STATUS_COMPLETED
-                    i.transmission_provider = "email_pdf"
-                    i.transmission_info = {
-                        "sent": [
-                            {
-                                "recipients": outgoing_mail.to,
-                                "datetime": now().isoformat(),
-                            }
-                        ]
-                    }
-                    i.save(update_fields=[
-                        "transmission_date", "transmission_provider", "transmission_status",
-                        "transmission_info"
-                    ])
-                elif i.transmission_provider == "email_pdf":
-                    i.transmission_info["sent"].append(
-                        {
-                            "recipients": outgoing_mail.to,
-                            "datetime": now().isoformat(),
-                        }
-                    )
-                    i.save(update_fields=[
-                        "transmission_info"
-                    ])
-                i.order.log_action(
-                    "pretix.event.order.invoice.sent",
-                    data={
-                        "full_invoice_no": i.full_invoice_no,
-                        "transmission_provider": "email_pdf",
-                        "transmission_type": "email",
-                        "data": {
-                            "recipients": outgoing_mail.to,
-                        },
-                    }
-                )
     return True
 
 
