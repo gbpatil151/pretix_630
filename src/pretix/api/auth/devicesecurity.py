@@ -26,9 +26,9 @@ from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
 from pretix.api.signals import register_device_security_profile
+from pretix.base.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
-_ALL_PROFILES = None
 
 
 class BaseSecurityProfile:
@@ -155,21 +155,24 @@ class PretixScanNoSyncSecurityProfile(AllowListSecurityProfile):
     )
 
 
+class SecurityProfileRegistry(PluginRegistry):
+    def _collect(self, **kwargs):
+        from pretix.api.signals import register_device_security_profile
+        types = OrderedDict()
+        for recv, ret in register_device_security_profile.send(None):
+            if isinstance(ret, (list, tuple)):
+                for r in ret:
+                    types[r.identifier] = r
+            else:
+                types[ret.identifier] = ret
+        return types
+
+
+_SECURITY_PROFILE_REGISTRY = SecurityProfileRegistry()
+
+
 def get_all_security_profiles():
-    global _ALL_PROFILES
-
-    if _ALL_PROFILES:
-        return _ALL_PROFILES
-
-    types = OrderedDict()
-    for recv, ret in register_device_security_profile.send(None):
-        if isinstance(ret, (list, tuple)):
-            for r in ret:
-                types[r.identifier] = r
-        else:
-            types[ret.identifier] = ret
-    _ALL_PROFILES = types
-    return types
+    return _SECURITY_PROFILE_REGISTRY.get_or_create()
 
 
 @receiver(register_device_security_profile, dispatch_uid="base_register_default_security_profiles")

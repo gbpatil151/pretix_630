@@ -39,6 +39,7 @@ from pretix.api.models import (
 )
 from pretix.api.signals import register_webhook_events
 from pretix.base.models import LogEntry
+from pretix.base.registry import PluginRegistry
 from pretix.base.services.tasks import ProfiledTask, TransactionAwareTask
 from pretix.base.signals import periodic_task
 from pretix.celery_app import app
@@ -46,7 +47,6 @@ from pretix.helpers import OF_SELF
 from pretix.helpers.celery import get_task_priority
 
 logger = logging.getLogger(__name__)
-_ALL_EVENTS = None
 
 
 class WebhookEvent:
@@ -87,21 +87,24 @@ class WebhookEvent:
         return ""
 
 
+class WebhookEventRegistry(PluginRegistry):
+    def _collect(self, **kwargs):
+        from pretix.api.signals import register_webhook_events
+        types = OrderedDict()
+        for recv, ret in register_webhook_events.send(None):
+            if isinstance(ret, (list, tuple)):
+                for r in ret:
+                    types[r.action_type] = r
+            else:
+                types[ret.action_type] = ret
+        return types
+
+
+_WEBHOOK_EVENT_REGISTRY = WebhookEventRegistry()
+
+
 def get_all_webhook_events():
-    global _ALL_EVENTS
-
-    if _ALL_EVENTS:
-        return _ALL_EVENTS
-
-    types = OrderedDict()
-    for recv, ret in register_webhook_events.send(None):
-        if isinstance(ret, (list, tuple)):
-            for r in ret:
-                types[r.action_type] = r
-        else:
-            types[ret.action_type] = ret
-    _ALL_EVENTS = types
-    return types
+    return _WEBHOOK_EVENT_REGISTRY.get_or_create()
 
 
 class ParametrizedWebhookEvent(WebhookEvent):

@@ -26,12 +26,10 @@ from collections import OrderedDict
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
-from pretix.base.signals import (
-    register_sales_channel_types, register_sales_channels,
-)
+from pretix.base.registry import PluginRegistry
+from pretix.base.signals import register_sales_channel_types
 
 logger = logging.getLogger(__name__)
-_ALL_CHANNEL_TYPES = None
 
 
 class SalesChannelType:
@@ -131,29 +129,35 @@ class SalesChannelType:
         return
 
 
+class ChannelTypeRegistry(PluginRegistry):
+    def _collect(self, **kwargs):
+        from pretix.base.signals import (
+            register_sales_channel_types, register_sales_channels,
+        )
+
+        channels = []
+        for recv, ret in register_sales_channel_types.send(None):
+            if isinstance(ret, (list, tuple)):
+                channels += ret
+            else:
+                channels.append(ret)
+        for recv, ret in register_sales_channels.send(None):  # todo: remove me
+            if isinstance(ret, (list, tuple)):
+                channels += ret
+            else:
+                channels.append(ret)
+        channels.sort(key=lambda c: c.identifier)
+        cache = OrderedDict([(c.identifier, c) for c in channels])
+        if 'web' in cache:
+            cache.move_to_end('web', last=False)
+        return cache
+
+
+_CHANNEL_TYPE_REGISTRY = ChannelTypeRegistry()
+
+
 def get_all_sales_channel_types():
-    from pretix.base.signals import register_sales_channel_types
-    global _ALL_CHANNEL_TYPES
-
-    if _ALL_CHANNEL_TYPES:
-        return _ALL_CHANNEL_TYPES
-
-    channels = []
-    for recv, ret in register_sales_channel_types.send(None):
-        if isinstance(ret, (list, tuple)):
-            channels += ret
-        else:
-            channels.append(ret)
-    for recv, ret in register_sales_channels.send(None):  # todo: remove me
-        if isinstance(ret, (list, tuple)):
-            channels += ret
-        else:
-            channels.append(ret)
-    channels.sort(key=lambda c: c.identifier)
-    _ALL_CHANNEL_TYPES = OrderedDict([(c.identifier, c) for c in channels])
-    if 'web' in _ALL_CHANNEL_TYPES:
-        _ALL_CHANNEL_TYPES.move_to_end('web', last=False)
-    return _ALL_CHANNEL_TYPES
+    return _CHANNEL_TYPE_REGISTRY.get_or_create()
 
 
 def get_all_sales_channels():

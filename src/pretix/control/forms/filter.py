@@ -61,6 +61,7 @@ from pretix.base.models import (
     SalesChannel, SubEvent, SubEventMetaValue, Team, TeamAPIToken, TeamInvite,
     Voucher,
 )
+from pretix.base.registry import PluginRegistry
 from pretix.base.signals import register_payment_providers
 from pretix.base.timeframes import (
     DateFrameField,
@@ -77,69 +78,69 @@ from pretix.helpers.dicts import move_to_end
 from pretix.helpers.i18n import get_format_without_seconds, i18ncomp
 from pretix.helpers.models import flatten_choices
 
-PAYMENT_PROVIDERS = []
+
+class PaymentProviderRegistry(PluginRegistry):
+    def _collect(self, **kwargs):
+        class FakeSettings:
+            def __init__(self, orig_settings):
+                self.orig_settings = orig_settings
+
+            def set(self, *args, **kwargs):
+                pass
+
+            def __getattr__(self, item):
+                return getattr(self.orig_settings, item)
+
+        class FakeEvent:
+            def __init__(self, orig_event):
+                self.orig_event = orig_event
+
+            @property
+            def settings(self):
+                return FakeSettings(self.orig_event.settings)
+
+            def __getattr__(self, item):
+                return getattr(self.orig_event, item)
+
+            @property
+            def __class__(self):  # hackhack
+                return Event
+
+        with rolledback_transaction():
+            plugins = ",".join([app.name for app in apps.get_app_configs()])
+            organizer = Organizer.objects.create(
+                name="INTERNAL",
+                plugins=plugins,
+            )
+            event = Event.objects.create(
+                plugins=plugins,
+                name="INTERNAL",
+                date_from=now(),
+                organizer=organizer,
+            )
+            event = FakeEvent(event)
+            provs = register_payment_providers.send(
+                sender=event
+            )
+            choices = []
+            for recv, prov in provs:
+                if isinstance(prov, list):
+                    for p in prov:
+                        p = p(event)
+                        if not p.is_meta:
+                            choices.append((p.identifier, p.verbose_name))
+                else:
+                    prov = prov(event)
+                    if not prov.is_meta:
+                        choices.append((prov.identifier, prov.verbose_name))
+        return choices
+
+
+_PAYMENT_PROVIDER_REGISTRY = PaymentProviderRegistry()
 
 
 def get_all_payment_providers():
-    global PAYMENT_PROVIDERS
-
-    if PAYMENT_PROVIDERS:
-        return PAYMENT_PROVIDERS
-
-    class FakeSettings:
-        def __init__(self, orig_settings):
-            self.orig_settings = orig_settings
-
-        def set(self, *args, **kwargs):
-            pass
-
-        def __getattr__(self, item):
-            return getattr(self.orig_settings, item)
-
-    class FakeEvent:
-        def __init__(self, orig_event):
-            self.orig_event = orig_event
-
-        @property
-        def settings(self):
-            return FakeSettings(self.orig_event.settings)
-
-        def __getattr__(self, item):
-            return getattr(self.orig_event, item)
-
-        @property
-        def __class__(self):  # hackhack
-            return Event
-
-    with rolledback_transaction():
-        plugins = ",".join([app.name for app in apps.get_app_configs()])
-        organizer = Organizer.objects.create(
-            name="INTERNAL",
-            plugins=plugins,
-        )
-        event = Event.objects.create(
-            plugins=plugins,
-            name="INTERNAL",
-            date_from=now(),
-            organizer=organizer,
-        )
-        event = FakeEvent(event)
-        provs = register_payment_providers.send(
-            sender=event
-        )
-        choices = []
-        for recv, prov in provs:
-            if isinstance(prov, list):
-                for p in prov:
-                    p = p(event)
-                    if not p.is_meta:
-                        choices.append((p.identifier, p.verbose_name))
-            else:
-                prov = prov(event)
-                if not prov.is_meta:
-                    choices.append((prov.identifier, prov.verbose_name))
-    PAYMENT_PROVIDERS = choices
-    return choices
+    return _PAYMENT_PROVIDER_REGISTRY.get_or_create()
 
 
 class FilterForm(forms.Form):
