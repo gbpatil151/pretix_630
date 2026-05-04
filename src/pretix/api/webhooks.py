@@ -292,87 +292,19 @@ class ParametrizedCustomerWebhookEvent(ParametrizedWebhookEvent):
 
 @receiver(register_webhook_events, dispatch_uid="base_register_default_webhook_events")
 def register_default_webhook_events(sender, **kwargs):
-    return (
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.placed',
-            _('New order placed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.placed.require_approval',
-            _('New order requires approval'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.paid',
-            _('Order marked as paid'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.canceled',
-            _('Order canceled'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.reactivated',
-            _('Order reactivated'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.expired',
-            _('Order expired'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.expirychanged',
-            _('Order expiry date changed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.modified',
-            _('Order information changed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.contact.changed',
-            _('Order contact address changed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.changed.*',
-            _('Order changed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.refund.created',
-            _('Refund of payment created'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.refund.created.externally',
-            _('External refund of payment'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.refund.requested',
-            _('Refund of payment requested by customer'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.refund.done',
-            _('Refund of payment completed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.refund.canceled',
-            _('Refund of payment canceled'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.refund.failed',
-            _('Refund of payment failed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.payment.confirmed',
-            _('Payment confirmed'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.approved',
-            _('Order approved'),
-        ),
-        ParametrizedOrderWebhookEvent(
-            'pretix.event.order.denied',
-            _('Order denied'),
-        ),
-        DeletedOrderWebhookEvent(
-            'pretix.event.order.deleted',
-            _('Order deleted'),
-        ),
+    from pretix.base.logaction import log_action_mediator
+
+    events = [
+        ParametrizedOrderWebhookEvent(action.action_type, action.webhook_event)
+        for action in log_action_mediator.get_all().values()
+        if action.webhook_event and action.action_type.startswith('pretix.event.order.') and action.action_type != 'pretix.event.order.deleted'
+    ]
+
+    deleted_action = log_action_mediator.get_action('pretix.event.order.deleted')
+    if deleted_action and deleted_action.webhook_event:
+        events.append(DeletedOrderWebhookEvent(deleted_action.action_type, deleted_action.webhook_event))
+
+    return tuple(events) + (
         ParametrizedOrderPositionCheckinWebhookEvent(
             'pretix.event.checkin',
             _('Ticket checked in'),

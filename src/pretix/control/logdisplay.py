@@ -314,7 +314,14 @@ class OrderChangedSplitFrom(OrderLogEntryType):
         )
 
 
-@log_entry_types.new_from_dict({
+from pretix.base.logaction import log_action_mediator
+
+_core_order_actions = {
+    action.action_type: action.display_text
+    for action in log_action_mediator.get_all().values()
+    if action.display_text and action.action_type.startswith('pretix.event.order.')
+}
+_core_order_actions.update({
     'pretix.event.checkin.unknown': (
         _('Unknown scan of code "{barcode}…" at {datetime} for list "{list}", type "{type}".'),
         _('Unknown scan of code "{barcode}…" for list "{list}", type "{type}".'),
@@ -338,6 +345,8 @@ class OrderChangedSplitFrom(OrderLogEntryType):
     'pretix.control.views.checkin.reverted': _('The check-in of position #{posid} on list "{list}" has been reverted.'),
     'pretix.event.checkin.reverted': _('The check-in of position #{posid} on list "{list}" has been reverted.'),
 })
+
+
 class CheckinErrorLogEntryType(OrderLogEntryType):
     def display(self, logentry: LogEntry, data):
         return self.display_plain(self.plain, logentry, data)
@@ -501,26 +510,13 @@ def pretixcontrol_orderposition_blocked_display(sender: Event, orderposition, bl
 
 
 @log_entry_types.new_from_dict({
-    'pretix.event.order.deleted': _('The test mode order {code} has been deleted.'),
-    'pretix.event.order.modified': _('The order details have been changed.'),
     'pretix.event.order.unpaid': _('The order has been marked as unpaid.'),
     'pretix.event.order.secret.changed': _('The order\'s secret has been changed.'),
-    'pretix.event.order.expirychanged': _('The order\'s expiry date has been changed.'),
     'pretix.event.order.valid_if_pending.set': _('The order has been set to be usable before it is paid.'),
     'pretix.event.order.valid_if_pending.unset': _('The order has been set to require payment before use.'),
-    'pretix.event.order.expired': _('The order has been marked as expired.'),
-    'pretix.event.order.paid': _('The order has been marked as paid.'),
     'pretix.event.order.cancellationrequest.deleted': _('The cancellation request has been deleted.'),
     'pretix.event.order.refunded': _('The order has been refunded.'),
-    'pretix.event.order.reactivated': _('The order has been reactivated.'),
-    'pretix.event.order.placed': _('The order has been created.'),
-    'pretix.event.order.placed.require_approval': _(
-        'The order requires approval before it can continue to be processed.'),
-    'pretix.event.order.approved': _('The order has been approved.'),
-    'pretix.event.order.denied': _('The order has been denied (comment: "{comment}").'),
     'pretix.event.order.vatid.validated': _('The customer VAT ID has been verified.'),
-    'pretix.event.order.contact.changed': _('The email address has been changed from "{old_email}" '
-                                            'to "{new_email}".'),
     'pretix.event.order.contact.confirmed': _(
         'The email address has been confirmed to be working (the user clicked on a link '
         'in the email for the first time).'),
@@ -578,6 +574,7 @@ def pretixcontrol_orderposition_blocked_display(sender: Event, orderposition, bl
     'pretix.event.order.email.resend': _('An email with a link to the order detail page has been resent to the user.'),
     'pretix.event.order.email.payment_failed': _('An email has been sent to notify the user that the payment failed.'),
 })
+@log_entry_types.new_from_dict(_core_order_actions)
 class CoreOrderLogEntryType(OrderLogEntryType):
     pass
 
