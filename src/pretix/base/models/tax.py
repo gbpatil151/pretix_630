@@ -448,9 +448,7 @@ class TaxRule(LoggedModel):
         return self.custom_rules and self.custom_rules != '[]'
 
     def tax_rate_for(self, invoice_address):
-        from pretix.base.services.tax_strategy import (
-            get_tax_strategy,
-        )
+        from pretix.base.services.tax_strategy import get_tax_strategy
         strategy = get_tax_strategy(self)
         return strategy.get_tax_rate(self, invoice_address)
 
@@ -563,9 +561,7 @@ class TaxRule(LoggedModel):
         return {'action': 'vat'}
 
     def invoice_text(self, invoice_address):
-        from pretix.base.services.tax_strategy import (
-            get_tax_strategy,
-        )
+        from pretix.base.services.tax_strategy import get_tax_strategy
         strategy = get_tax_strategy(self)
         text = strategy.get_invoice_text(
             self, invoice_address
@@ -592,9 +588,7 @@ class TaxRule(LoggedModel):
                 )
 
     def is_reverse_charge(self, invoice_address):
-        from pretix.base.services.tax_strategy import (
-            get_tax_strategy,
-        )
+        from pretix.base.services.tax_strategy import get_tax_strategy
         strategy = get_tax_strategy(self)
         return strategy.is_reverse_charge(
             self, invoice_address
@@ -608,16 +602,12 @@ class TaxRule(LoggedModel):
         return False
 
     def tax_code_for(self, invoice_address):
-        from pretix.base.services.tax_strategy import (
-            get_tax_strategy,
-        )
+        from pretix.base.services.tax_strategy import get_tax_strategy
         strategy = get_tax_strategy(self)
         return strategy.get_tax_code(self, invoice_address)
 
     def _tax_applicable(self, invoice_address):
-        from pretix.base.services.tax_strategy import (
-            get_tax_strategy,
-        )
+        from pretix.base.services.tax_strategy import get_tax_strategy
         strategy = get_tax_strategy(self)
         return strategy.is_tax_applicable(
             self, invoice_address
