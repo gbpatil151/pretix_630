@@ -25,11 +25,12 @@ import math
 import re
 import textwrap
 import unicodedata
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from decimal import Decimal
 from io import BytesIO
 from itertools import groupby
-from typing import Tuple
+from typing import List, Tuple
 
 import bleach
 from bidi import get_display
@@ -378,9 +379,523 @@ class PaidMarker(Flowable):
         self.canv.roundRect(-width - self.size / 2, -self.size / 4, width + self.size, self.size + self.size / 4, 3)
 
 
+class InvoiceSectionStrategy(ABC):
+    """
+    Strategy for one part of the classic invoice PDF story (pretix_630 #66).
+
+    Returns Platypus Flowables and may mutate ``InvoiceStoryContext`` (e.g. line-item table data).
+    Subclasses of ``ClassicInvoiceRenderer`` can extend ``invoice_story_strategies`` to add sections
+    without changing the compositor loop.
+    """
+    @abstractmethod
+    def render(self, ctx: "InvoiceStoryContext") -> List[Flowable]:
+        raise NotImplementedError()
+
+
+class InvoiceStoryContext:
+    """Mutable per-document state shared while building the main invoice table and tax summary."""
+
+    def __init__(self, renderer: "ClassicInvoiceRenderer", doc):
+        self.renderer = renderer
+        self.doc = doc
+        self.invoice = renderer.invoice
+        self.all_lines = list(self.invoice.lines.all())
+        self.has_taxes = any(il.tax_value for il in self.all_lines) or self.invoice.reverse_charge
+        self.header_dates = renderer._date_range_in_header()
+        self.tz = self.invoice.event.timezone
+        self.has_multiple_service_dates = len(set(
+            (il.period_start, il.period_end) for il in self.all_lines
+        )) > 1
+        self.request_show_service_date = False
+        self.taxvalue_map = defaultdict(Decimal)
+        self.grossvalue_map = defaultdict(Decimal)
+        self.total = Decimal("0.00")
+        self.tstyledata = [
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTNAME", (0, 0), (-1, -1), renderer.font_regular),
+            ("FONTNAME", (0, 0), (-1, 0), renderer.font_bold),
+            ("FONTNAME", (0, -1), (-1, -1), renderer.font_bold),
+            ("LEFTPADDING", (0, 0), (0, -1), 0),
+            ("RIGHTPADDING", (-1, 0), (-1, -1), 0),
+        ]
+        if self.has_taxes:
+            self.tdata = [(
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Description")), renderer.stylesheet["Bold"]),
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Qty")), renderer.stylesheet["BoldRightNoSplit"]),
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Tax rate")), renderer.stylesheet["BoldRightNoSplit"]),
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Net")), renderer.stylesheet["BoldRightNoSplit"]),
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Gross")), renderer.stylesheet["BoldRightNoSplit"]),
+            )]
+        else:
+            self.tdata = [(
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Description")), renderer.stylesheet["Bold"]),
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Qty")), renderer.stylesheet["BoldRightNoSplit"]),
+                FontFallbackParagraph(renderer._normalize(pgettext("invoice", "Amount")), renderer.stylesheet["BoldRightNoSplit"]),
+            )]
+        if self.has_taxes:
+            self.colwidths = [a * doc.width for a in (.50, .05, .15, .15, .15)]
+        else:
+            self.colwidths = [a * doc.width for a in (.65, .20, .15)]
+
+
+class InvoicePdfTitleHeaderSection(InvoiceSectionStrategy):
+    """Page template switches and document title (Invoice / Tax Invoice / Cancellation)."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        return [
+            NextPageTemplate("FirstPage"),
+            FontFallbackParagraph(
+                r._normalize(
+                    pgettext("invoice", "Tax Invoice") if str(r.invoice.invoice_from_country) == "AU"
+                    else pgettext("invoice", "Invoice")
+                ) if not r.invoice.is_cancellation else r._normalize(pgettext("invoice", "Cancellation")),
+                r.stylesheet["Heading1"],
+            ),
+            Spacer(1, 5 * mm),
+            NextPageTemplate("OtherPages"),
+        ]
+
+
+class InvoicePdfIntroSection(InvoiceSectionStrategy):
+    """Delegates to ``ClassicInvoiceRenderer._get_intro()`` (unchanged API per #66)."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        return list(ctx.renderer._get_intro())
+
+
+class InvoicePdfLineItemsSection(InvoiceSectionStrategy):
+    """Grouped line items: description cells, optional periods, tax columns — fills ``ctx.tdata`` / tax maps."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        doc = ctx.doc
+
+        def _group_key(line):
+            return (
+                line.description, line.tax_rate, line.tax_name, line.net_value, line.gross_value, line.subevent,
+                line.period_start, line.period_end,
+            )
+
+        def day(dt: datetime.datetime) -> datetime.date:
+            if dt is None:
+                return None
+            return dt.astimezone(ctx.tz).date()
+
+        for (description, tax_rate, tax_name, net_value, gross_value, subevent, period_start, period_end), lines in addon_aware_groupby(
+            ctx.all_lines,
+            key=_group_key,
+            is_addon=lambda l: l.description.startswith("  +"),
+        ):
+            description_p_list = []
+            description = description.replace("<br>", "<br />").replace("<br />\n", "\n").replace("<br />", "\n")
+            curr_description = description.split("\n", maxsplit=1)[0]
+            cellpadding = 6
+            max_width = ctx.colwidths[0] - cellpadding
+            max_height = r.stylesheet["Normal"].leading * 5
+            p_style = r.stylesheet["Normal"]
+            for __ in range(1000):
+                p = FontFallbackParagraph(
+                    r._clean_text(curr_description, tags=["br"]),
+                    p_style,
+                )
+                h = p.wrap(max_width, doc.height)[1]
+                if h <= max_height:
+                    description_p_list.append(p)
+                    if curr_description == description:
+                        break
+                    description = description[len(curr_description):].lstrip()
+                    curr_description = description.split("\n", maxsplit=1)[0]
+                    max_width = sum(ctx.colwidths[0:3 if ctx.has_taxes else 2]) - cellpadding
+                    max_height = r.stylesheet["Fineprint"].leading * 8
+                    p_style = r.stylesheet["Fineprint"]
+                    continue
+                if not description_p_list:
+                    max_height = r.stylesheet["Normal"].leading
+                if h > max_height * 1.1:
+                    wrap_to = math.ceil(len(curr_description) * max_height * 1.1 / h)
+                else:
+                    wrap_to = max(len(curr_description) - 10, math.ceil(len(curr_description) * 0.95))
+                curr_description = textwrap.wrap(curr_description, wrap_to, replace_whitespace=False, drop_whitespace=False)[0]
+
+            period_start_day = day(period_start)
+            period_end_day = day(period_end)
+            if period_start and period_end and period_end_day != period_start_day:
+                if period_start_day == ctx.header_dates[0] and period_end_day == ctx.header_dates[1]:
+                    period_line = ""
+                elif (r.event.has_subevents and subevent and day(subevent.date_from) == period_start_day and
+                      day(subevent.date_to) == period_end_day):
+                    period_line = ""
+                else:
+                    period_line = f"{date_format(period_start_day, 'SHORT_DATE_FORMAT')} – {date_format(period_end_day, 'SHORT_DATE_FORMAT')}"
+            elif period_start or period_end:
+                delivery_day = period_end_day or period_start_day
+                if delivery_day in ctx.header_dates:
+                    period_line = ""
+                elif r.event.has_subevents and subevent and delivery_day in (day(subevent.date_from), day(subevent.date_to)):
+                    period_line = ""
+                elif (delivery_day == r.invoice.date) and ctx.header_dates[0] is None:
+                    period_line = ""
+                else:
+                    period_line = date_format(delivery_day, "SHORT_DATE_FORMAT")
+            else:
+                period_line = ""
+
+            if not ctx.has_multiple_service_dates and period_line:
+                ctx.request_show_service_date = period_line
+            elif period_line:
+                description_p_list.append(FontFallbackParagraph(
+                    period_line,
+                    r.stylesheet["Fineprint"],
+                ))
+
+            lines = list(lines)
+            if ctx.has_taxes:
+                if len(lines) > 1:
+                    single_price_line = pgettext("invoice", "Single price: {net_price} net / {gross_price} gross").format(
+                        net_price=money_filter(net_value, r.invoice.event.currency),
+                        gross_price=money_filter(gross_value, r.invoice.event.currency),
+                    )
+                    description_p_list.append(FontFallbackParagraph(
+                        single_price_line,
+                        r.stylesheet["Fineprint"],
+                    ))
+                ctx.tdata.append((
+                    description_p_list.pop(0),
+                    str(len(lines)),
+                    localize(tax_rate) + " %",
+                    FontFallbackParagraph(
+                        money_filter(net_value * len(lines), r.invoice.event.currency).replace("\xa0", " "),
+                        r.stylesheet["NormalRight"],
+                    ),
+                    FontFallbackParagraph(
+                        money_filter(gross_value * len(lines), r.invoice.event.currency).replace("\xa0", " "),
+                        r.stylesheet["NormalRight"],
+                    ),
+                ))
+                for p in description_p_list:
+                    ctx.tdata.append((p, "", "", "", ""))
+                    ctx.tstyledata.append((
+                        "SPAN",
+                        (0, len(ctx.tdata) - 1),
+                        (2, len(ctx.tdata) - 1),
+                    ))
+            else:
+                if len(lines) > 1:
+                    single_price_line = pgettext("invoice", "Single price: {price}").format(
+                        price=money_filter(gross_value, r.invoice.event.currency),
+                    )
+                    description_p_list.append(FontFallbackParagraph(
+                        single_price_line,
+                        r.stylesheet["Fineprint"],
+                    ))
+                ctx.tdata.append((
+                    description_p_list.pop(0),
+                    str(len(lines)),
+                    FontFallbackParagraph(
+                        money_filter(gross_value * len(lines), r.invoice.event.currency).replace("\xa0", " "),
+                        r.stylesheet["NormalRight"],
+                    ),
+                ))
+                for p in description_p_list:
+                    ctx.tdata.append((p, "", ""))
+                    ctx.tstyledata.append((
+                        "SPAN",
+                        (0, len(ctx.tdata) - 1),
+                        (1, len(ctx.tdata) - 1),
+                    ))
+
+            ctx.tstyledata += [
+                (
+                    "BOTTOMPADDING",
+                    (0, len(ctx.tdata) - len(description_p_list)),
+                    (-1, len(ctx.tdata) - 2),
+                    0,
+                ),
+                (
+                    "TOPPADDING",
+                    (0, len(ctx.tdata) - len(description_p_list)),
+                    (-1, len(ctx.tdata) - 1),
+                    0,
+                ),
+            ]
+            ctx.taxvalue_map[tax_rate, tax_name] += (gross_value - net_value) * len(lines)
+            ctx.grossvalue_map[tax_rate, tax_name] += gross_value * len(lines)
+            ctx.total += gross_value * len(lines)
+        return []
+
+
+class InvoicePdfInvoiceTotalRowSection(InvoiceSectionStrategy):
+    """Invoice total row appended to the main line-items table."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        if ctx.has_taxes:
+            ctx.tdata.append([
+                FontFallbackParagraph(r._normalize(pgettext("invoice", "Invoice total")), r.stylesheet["Bold"]),
+                "", "", "",
+                money_filter(ctx.total, r.invoice.event.currency),
+            ])
+        else:
+            ctx.tdata.append([
+                FontFallbackParagraph(r._normalize(pgettext("invoice", "Invoice total")), r.stylesheet["Bold"]),
+                "",
+                money_filter(ctx.total, r.invoice.event.currency),
+            ])
+        return []
+
+
+class InvoicePdfEmbeddedPaymentsTableSection(InvoiceSectionStrategy):
+    """Pending balance, gift card, or paid marker rows inside the same table as line items."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        inv = r.invoice
+        if inv.is_cancellation:
+            return []
+        if inv.event.settings.invoice_show_payments and inv.order.status == Order.STATUS_PENDING:
+            pending_sum = inv.order.pending_sum
+            if pending_sum != ctx.total:
+                ctx.tdata.append(
+                    [FontFallbackParagraph(r._normalize(pgettext("invoice", "Received payments")), r.stylesheet["Normal"])]
+                    + (["", "", ""] if ctx.has_taxes else [""])
+                    + [money_filter(pending_sum - ctx.total, inv.event.currency)]
+                )
+                ctx.tdata.append(
+                    [FontFallbackParagraph(r._normalize(pgettext("invoice", "Outstanding payments")), r.stylesheet["Bold"])]
+                    + (["", "", ""] if ctx.has_taxes else [""])
+                    + [money_filter(pending_sum, inv.event.currency)]
+                )
+                ctx.tstyledata += [
+                    ("FONTNAME", (0, len(ctx.tdata) - 3), (-1, len(ctx.tdata) - 3), r.font_bold),
+                ]
+        elif inv.event.settings.invoice_show_payments and inv.order.payments.filter(
+                state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED), provider="giftcard"
+        ).exists():
+            giftcard_sum = inv.order.payments.filter(
+                state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED),
+                provider="giftcard",
+            ).aggregate(s=Sum("amount"))["s"] or Decimal("0.00")
+            ctx.tdata.append(
+                [FontFallbackParagraph(r._normalize(pgettext("invoice", "Paid by gift card")), r.stylesheet["Normal"])]
+                + (["", "", ""] if ctx.has_taxes else [""])
+                + [money_filter(giftcard_sum, inv.event.currency)]
+            )
+            ctx.tdata.append(
+                [FontFallbackParagraph(r._normalize(pgettext("invoice", "Remaining amount")), r.stylesheet["Bold"])]
+                + (["", "", ""] if ctx.has_taxes else [""])
+                + [money_filter(ctx.total - giftcard_sum, inv.event.currency)]
+            )
+            ctx.tstyledata += [
+                ("FONTNAME", (0, len(ctx.tdata) - 3), (-1, len(ctx.tdata) - 3), r.font_bold),
+            ]
+        elif inv.payment_provider_stamp:
+            pm = PaidMarker(
+                text=r._normalize(inv.payment_provider_stamp),
+                color=colors.HexColor(r.event.settings.theme_color_success),
+                font=r.font_bold,
+                size=16,
+            )
+            ctx.tdata[-1][-2] = pm
+        return []
+
+
+class InvoicePdfMainLineItemsTableSection(InvoiceSectionStrategy):
+    """Turn accumulated ``tdata`` / ``tstyledata`` into the main Platypus ``Table``."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        table = Table(ctx.tdata, colWidths=ctx.colwidths, repeatRows=1)
+        table.setStyle(TableStyle(ctx.tstyledata))
+        return [table]
+
+
+class InvoicePdfPostTableNotesSection(InvoiceSectionStrategy):
+    """Spacing and optional consolidated service-period line after the main table."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        out = [Spacer(1, 10 * mm)]
+        if ctx.request_show_service_date:
+            out.append(FontFallbackParagraph(
+                r._normalize(pgettext("invoice", "Invoice period: {daterange}").format(daterange=ctx.request_show_service_date)),
+                r.stylesheet["Normal"],
+            ))
+        return out
+
+
+class InvoicePdfPaymentProviderTextSection(InvoiceSectionStrategy):
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        if not r.invoice.payment_provider_text:
+            return []
+        return [
+            FontFallbackParagraph(
+                r._normalize(r.invoice.payment_provider_text),
+                r.stylesheet["Normal"],
+            ),
+        ]
+
+
+class InvoicePdfAdditionalTextSection(InvoiceSectionStrategy):
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        if not r.invoice.additional_text:
+            return []
+        out = []
+        if r.invoice.payment_provider_text:
+            out.append(Spacer(1, 3 * mm))
+        out.append(
+            FontFallbackParagraph(
+                r._clean_text(r.invoice.additional_text, tags=["br"]),
+                r.stylesheet["Normal"],
+            )
+        )
+        out.append(Spacer(1, 5 * mm))
+        return out
+
+
+class InvoicePdfTaxSummarySection(InvoiceSectionStrategy):
+    """Included taxes table and optional foreign-currency breakdown when tax rows exist."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+        doc = ctx.doc
+        out: List[Flowable] = []
+        tstyledata = [
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("LEFTPADDING", (0, 0), (0, -1), 0),
+            ("RIGHTPADDING", (-1, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTNAME", (0, 0), (-1, -1), r.font_regular),
+        ]
+        thead = [
+            FontFallbackParagraph(r._normalize(pgettext("invoice", "Tax rate")), r.stylesheet["Fineprint"]),
+            FontFallbackParagraph(r._normalize(pgettext("invoice", "Net value")), r.stylesheet["FineprintRight"]),
+            FontFallbackParagraph(r._normalize(pgettext("invoice", "Gross value")), r.stylesheet["FineprintRight"]),
+            FontFallbackParagraph(r._normalize(pgettext("invoice", "Tax")), r.stylesheet["FineprintRight"]),
+            "",
+        ]
+        tdata = [thead]
+        for idx, gross in ctx.grossvalue_map.items():
+            rate, name = idx
+            if rate == 0 and gross == 0:
+                continue
+            tax = ctx.taxvalue_map[idx]
+            tdata.append([
+                FontFallbackParagraph(r._normalize(localize(rate) + " % " + name), r.stylesheet["Fineprint"]),
+                money_filter(gross - tax, r.invoice.event.currency),
+                money_filter(gross, r.invoice.event.currency),
+                money_filter(tax, r.invoice.event.currency),
+                "",
+            ])
+
+        def fmt(val):
+            try:
+                return money_filter(val, r.invoice.foreign_currency_display)
+            except ValueError:
+                return localize(val) + " " + r.invoice.foreign_currency_display
+
+        if any(rate != 0 and gross != 0 for (rate, name), gross in ctx.grossvalue_map.items()) and ctx.has_taxes:
+            colwidths = [a * doc.width for a in (.25, .15, .15, .15, .3)]
+            table = Table(tdata, colWidths=colwidths, repeatRows=2, hAlign=TA_LEFT)
+            table.setStyle(TableStyle(tstyledata))
+            out.append(Spacer(5 * mm, 5 * mm))
+            out.append(KeepTogether([
+                FontFallbackParagraph(r._normalize(pgettext("invoice", "Included taxes")), r.stylesheet["FineprintHeading"]),
+                table,
+            ]))
+            if r.invoice.foreign_currency_display and r.invoice.foreign_currency_rate:
+                tdata_fc = [thead]
+                for idx, gross in ctx.grossvalue_map.items():
+                    rate, name = idx
+                    if rate == 0:
+                        continue
+                    tax = ctx.taxvalue_map[idx]
+                    gross_fc = round_decimal(gross * r.invoice.foreign_currency_rate)
+                    tax_fc = round_decimal(tax * r.invoice.foreign_currency_rate)
+                    net_fc = gross_fc - tax_fc
+                    tdata_fc.append([
+                        FontFallbackParagraph(r._normalize(localize(rate) + " % " + name), r.stylesheet["Fineprint"]),
+                        fmt(net_fc), fmt(gross_fc), fmt(tax_fc), "",
+                    ])
+                table_fc = Table(tdata_fc, colWidths=colwidths, repeatRows=2, hAlign=TA_LEFT)
+                table_fc.setStyle(TableStyle(tstyledata))
+                out.append(KeepTogether([
+                    Spacer(1, height=2 * mm),
+                    FontFallbackParagraph(
+                        r._normalize(pgettext(
+                            "invoice", "Using the conversion rate of 1:{rate} as published by the {authority} on "
+                                       "{date}, this corresponds to:"
+                        ).format(
+                            rate=localize(r.invoice.foreign_currency_rate),
+                            authority=SOURCE_NAMES.get(r.invoice.foreign_currency_source, "?"),
+                            date=date_format(r.invoice.foreign_currency_rate_date, "SHORT_DATE_FORMAT"),
+                        )),
+                        r.stylesheet["Fineprint"],
+                    ),
+                    Spacer(1, height=3 * mm),
+                    table_fc,
+                ]))
+        return out
+
+
+class InvoicePdfStandaloneForeignCurrencySection(InvoiceSectionStrategy):
+    """Foreign total note when no included-taxes table is shown."""
+
+    def render(self, ctx: InvoiceStoryContext) -> List[Flowable]:
+        r = ctx.renderer
+
+        def fmt(val):
+            try:
+                return money_filter(val, r.invoice.foreign_currency_display)
+            except ValueError:
+                return localize(val) + " " + r.invoice.foreign_currency_display
+
+        if any(rate != 0 and gross != 0 for (rate, name), gross in ctx.grossvalue_map.items()) and ctx.has_taxes:
+            return []
+        if r.invoice.foreign_currency_display and r.invoice.foreign_currency_rate:
+            foreign_total = round_decimal(ctx.total * r.invoice.foreign_currency_rate)
+            return [
+                Spacer(1, 5 * mm),
+                FontFallbackParagraph(
+                    r._normalize(pgettext(
+                        "invoice", "Using the conversion rate of 1:{rate} as published by the {authority} on "
+                                   "{date}, the invoice total corresponds to {total}."
+                    ).format(
+                        rate=localize(r.invoice.foreign_currency_rate),
+                        date=date_format(r.invoice.foreign_currency_rate_date, "SHORT_DATE_FORMAT"),
+                        authority=SOURCE_NAMES.get(r.invoice.foreign_currency_source, "?"),
+                        total=fmt(foreign_total),
+                    )),
+                    r.stylesheet["Fineprint"],
+                ),
+            ]
+        return []
+
+
+DEFAULT_CLASSIC_INVOICE_STORY_STRATEGIES = (
+    InvoicePdfTitleHeaderSection(),
+    InvoicePdfIntroSection(),
+    InvoicePdfLineItemsSection(),
+    InvoicePdfInvoiceTotalRowSection(),
+    InvoicePdfEmbeddedPaymentsTableSection(),
+    InvoicePdfMainLineItemsTableSection(),
+    InvoicePdfPostTableNotesSection(),
+    InvoicePdfPaymentProviderTextSection(),
+    InvoicePdfAdditionalTextSection(),
+    InvoicePdfTaxSummarySection(),
+    InvoicePdfStandaloneForeignCurrencySection(),
+)
+
+
 class ClassicInvoiceRenderer(BaseReportlabInvoiceRenderer):
     identifier = 'classic'
     verbose_name = pgettext('invoice', 'Classic renderer (pretix 1.0)')
+    # Ordered PDF body sections (Strategy pattern; pretix_630#66). Subclasses may override this tuple.
+    invoice_story_strategies = DEFAULT_CLASSIC_INVOICE_STORY_STRATEGIES
 
     def canvas_class(self, *args, **kwargs):
         kwargs['font_regular'] = self.font_regular
@@ -692,434 +1207,11 @@ class ClassicInvoiceRenderer(BaseReportlabInvoiceRenderer):
         return story
 
     def _get_story(self, doc):
-        all_lines = list(self.invoice.lines.all())
-        has_taxes = any(il.tax_value for il in all_lines) or self.invoice.reverse_charge
-        header_dates = self._date_range_in_header()
-        tz = self.invoice.event.timezone
-        has_multiple_service_dates = len(set(
-            (il.period_start, il.period_end) for il in all_lines
-        )) > 1
-        request_show_service_date = False
-
-        story = [
-            NextPageTemplate('FirstPage'),
-            FontFallbackParagraph(
-                self._normalize(
-                    pgettext('invoice', 'Tax Invoice') if str(self.invoice.invoice_from_country) == 'AU'
-                    else pgettext('invoice', 'Invoice')
-                ) if not self.invoice.is_cancellation else self._normalize(pgettext('invoice', 'Cancellation')),
-                self.stylesheet['Heading1']
-            ),
-            Spacer(1, 5 * mm),
-            NextPageTemplate('OtherPages'),
-        ]
-        story += self._get_intro()
-
-        taxvalue_map = defaultdict(Decimal)
-        grossvalue_map = defaultdict(Decimal)
-
-        tstyledata = [
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('FONTNAME', (0, 0), (-1, -1), self.font_regular),
-            ('FONTNAME', (0, 0), (-1, 0), self.font_bold),
-            ('FONTNAME', (0, -1), (-1, -1), self.font_bold),
-            ('LEFTPADDING', (0, 0), (0, -1), 0),
-            ('RIGHTPADDING', (-1, 0), (-1, -1), 0),
-        ]
-        if has_taxes:
-            tdata = [(
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Description')), self.stylesheet['Bold']),
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Qty')), self.stylesheet['BoldRightNoSplit']),
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Tax rate')), self.stylesheet['BoldRightNoSplit']),
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Net')), self.stylesheet['BoldRightNoSplit']),
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Gross')), self.stylesheet['BoldRightNoSplit']),
-            )]
-        else:
-            tdata = [(
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Description')), self.stylesheet['Bold']),
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Qty')), self.stylesheet['BoldRightNoSplit']),
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Amount')), self.stylesheet['BoldRightNoSplit']),
-            )]
-
-        def _group_key(line):
-            return (line.description, line.tax_rate, line.tax_name, line.net_value, line.gross_value, line.subevent,
-                    line.period_start, line.period_end)
-
-        def day(dt: datetime.datetime) -> datetime.date:
-            if dt is None:
-                return None
-            return dt.astimezone(tz).date()
-
-        total = Decimal('0.00')
-        if has_taxes:
-            colwidths = [a * doc.width for a in (.50, .05, .15, .15, .15)]
-        else:
-            colwidths = [a * doc.width for a in (.65, .20, .15)]
-
-        for (description, tax_rate, tax_name, net_value, gross_value, subevent, period_start, period_end), lines in addon_aware_groupby(
-            all_lines,
-            key=_group_key,
-            is_addon=lambda l: l.description.startswith("  +"),
-        ):
-            # split description into multiple Paragraphs so each fits in a table cell on a single page
-            # otherwise PDF-build fails
-
-            description_p_list = []
-            # normalize linebreaks to newlines instead of HTML so we can safely substring
-            description = description.replace('<br>', '<br />').replace('<br />\n', '\n').replace('<br />', '\n')
-
-            # start first line with different settings than the rest of the description
-            curr_description = description.split("\n", maxsplit=1)[0]
-            cellpadding = 6  # default cellpadding is only set on right side of column
-            max_width = colwidths[0] - cellpadding
-            max_height = self.stylesheet['Normal'].leading * 5
-            p_style = self.stylesheet['Normal']
-            for __ in range(1000):
-                p = FontFallbackParagraph(
-                    self._clean_text(curr_description, tags=['br']),
-                    p_style
-                )
-                h = p.wrap(max_width, doc.height)[1]
-                if h <= max_height:
-                    description_p_list.append(p)
-                    if curr_description == description:
-                        break
-                    description = description[len(curr_description):].lstrip()
-                    curr_description = description.split("\n", maxsplit=1)[0]
-                    # use different settings for all except first line
-                    max_width = sum(colwidths[0:3 if has_taxes else 2]) - cellpadding
-                    max_height = self.stylesheet['Fineprint'].leading * 8
-                    p_style = self.stylesheet['Fineprint']
-                    continue
-
-                if not description_p_list:
-                    # first "manual" line is larger than 5 "real" lines => only allow one line and set rest in Fineprint
-                    max_height = self.stylesheet['Normal'].leading
-
-                if h > max_height * 1.1:
-                    # quickly bring the text-length down to a managable length to then stepwise reduce
-                    wrap_to = math.ceil(len(curr_description) * max_height * 1.1 / h)
-                else:
-                    # trim to 95% length, but at most 10 chars to not have strangely short lines in the middle of a paragraph
-                    wrap_to = max(len(curr_description) - 10, math.ceil(len(curr_description) * 0.95))
-                curr_description = textwrap.wrap(curr_description, wrap_to, replace_whitespace=False, drop_whitespace=False)[0]
-
-            # Try to be clever and figure out when organizers would want to show the period. This heuristic is
-            # not perfect and the only "fully correct" way would be to include the period on every line always,
-            # however this will cause confusion (a) due to useless repetition of the same date all over the invoice
-            # (b) due to not respecting the show_date_to setting of events in cases where we could have respected it.
-            # Still, we want to show the date explicitly if its different to the event or invoice date.
-            period_start_day = day(period_start)
-            period_end_day = day(period_end)
-            if period_start and period_end and period_end_day != period_start_day:
-                # It's a multi-day period, such as the validity of the ticket or an event date period
-
-                if period_start_day == header_dates[0] and period_end_day == header_dates[1]:
-                    # This is the exact event period we already printed in the header, no need to repeat it.
-                    period_line = ""
-
-                elif (self.event.has_subevents and subevent and day(subevent.date_from) == period_start_day and
-                      day(subevent.date_to) == period_end_day):
-                    # For subevents, build_invoice already includes the date in the description in the event-default format.
-                    period_line = ""
-
-                else:
-                    period_line = f"{date_format(period_start_day, 'SHORT_DATE_FORMAT')} – {date_format(period_end_day, 'SHORT_DATE_FORMAT')}"
-
-            elif period_start or period_end:
-                # It's a single-day period
-
-                delivery_day = period_end_day or period_start_day
-                if delivery_day in header_dates:
-                    # This is the event date we already printed in the header, no need to repeat it.
-                    period_line = ""
-
-                elif self.event.has_subevents and subevent and delivery_day in (day(subevent.date_from), day(subevent.date_to)):
-                    # For subevents, build_invoice already includes the date in the description in the event-default format.
-                    period_line = ""
-
-                elif (delivery_day == self.invoice.date) and header_dates[0] is None:
-                    # This is a shop that doesn't show the date of the event in the header, and the period is the invoice
-                    # date. We assume that this is an 'everything is executed immediately' situation and do not want to
-                    # confuse with showing additional dates on the invoice. This is the case that is not guaranteed to be
-                    # correct in all cases and might need to change in the future. If customers have legal concerns, a
-                    # quick fix is including a sentence like "Delivery date is the invoice date unless otherwise indicated:"
-                    # in a custom text on the invoice.
-                    period_line = ""
-
-                else:
-                    period_line = date_format(delivery_day, 'SHORT_DATE_FORMAT')
-            else:
-                # No period known
-                period_line = ""
-
-            if not has_multiple_service_dates and period_line:
-                # Group together at the end of the invoice
-                request_show_service_date = period_line
-            elif period_line:
-                description_p_list.append(FontFallbackParagraph(
-                    period_line,
-                    self.stylesheet['Fineprint']
-                ))
-
-            lines = list(lines)
-            if has_taxes:
-                if len(lines) > 1:
-                    single_price_line = pgettext('invoice', 'Single price: {net_price} net / {gross_price} gross').format(
-                        net_price=money_filter(net_value, self.invoice.event.currency),
-                        gross_price=money_filter(gross_value, self.invoice.event.currency),
-                    )
-                    description_p_list.append(FontFallbackParagraph(
-                        single_price_line,
-                        self.stylesheet['Fineprint']
-                    ))
-
-                tdata.append((
-                    description_p_list.pop(0),
-                    str(len(lines)),
-                    localize(tax_rate) + " %",
-                    FontFallbackParagraph(
-                        money_filter(net_value * len(lines), self.invoice.event.currency).replace('\xa0', ' '),
-                        self.stylesheet['NormalRight']
-                    ),
-                    FontFallbackParagraph(
-                        money_filter(gross_value * len(lines), self.invoice.event.currency).replace('\xa0', ' '),
-                        self.stylesheet['NormalRight']
-                    ),
-                ))
-                for p in description_p_list:
-                    tdata.append((p, "", "", "", ""))
-                    tstyledata.append((
-                        'SPAN',
-                        (0, len(tdata) - 1),
-                        (2, len(tdata) - 1),
-                    ))
-            else:
-                if len(lines) > 1:
-                    single_price_line = pgettext('invoice', 'Single price: {price}').format(
-                        price=money_filter(gross_value, self.invoice.event.currency),
-                    )
-                    description_p_list.append(FontFallbackParagraph(
-                        single_price_line,
-                        self.stylesheet['Fineprint']
-                    ))
-                tdata.append((
-                    description_p_list.pop(0),
-                    str(len(lines)),
-                    FontFallbackParagraph(
-                        money_filter(gross_value * len(lines), self.invoice.event.currency).replace('\xa0', ' '),
-                        self.stylesheet['NormalRight']
-                    ),
-                ))
-                for p in description_p_list:
-                    tdata.append((p, "", ""))
-                    tstyledata.append((
-                        'SPAN',
-                        (0, len(tdata) - 1),
-                        (1, len(tdata) - 1),
-                    ))
-
-            tstyledata += [
-                (
-                    'BOTTOMPADDING',
-                    (0, len(tdata) - len(description_p_list)),
-                    (-1, len(tdata) - 2),
-                    0
-                ),
-                (
-                    'TOPPADDING',
-                    (0, len(tdata) - len(description_p_list)),
-                    (-1, len(tdata) - 1),
-                    0
-                ),
-            ]
-            taxvalue_map[tax_rate, tax_name] += (gross_value - net_value) * len(lines)
-            grossvalue_map[tax_rate, tax_name] += gross_value * len(lines)
-            total += gross_value * len(lines)
-
-        if has_taxes:
-            tdata.append([
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Invoice total')), self.stylesheet['Bold']), '', '', '',
-                money_filter(total, self.invoice.event.currency)
-            ])
-        else:
-            tdata.append([
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Invoice total')), self.stylesheet['Bold']), '',
-                money_filter(total, self.invoice.event.currency)
-            ])
-
-        if not self.invoice.is_cancellation:
-            if self.invoice.event.settings.invoice_show_payments and self.invoice.order.status == Order.STATUS_PENDING:
-                pending_sum = self.invoice.order.pending_sum
-                if pending_sum != total:
-                    tdata.append(
-                        [FontFallbackParagraph(self._normalize(pgettext('invoice', 'Received payments')), self.stylesheet['Normal'])] +
-                        (['', '', ''] if has_taxes else ['']) +
-                        [money_filter(pending_sum - total, self.invoice.event.currency)]
-                    )
-                    tdata.append(
-                        [FontFallbackParagraph(self._normalize(pgettext('invoice', 'Outstanding payments')), self.stylesheet['Bold'])] +
-                        (['', '', ''] if has_taxes else ['']) +
-                        [money_filter(pending_sum, self.invoice.event.currency)]
-                    )
-                    tstyledata += [
-                        ('FONTNAME', (0, len(tdata) - 3), (-1, len(tdata) - 3), self.font_bold),
-                    ]
-            elif self.invoice.event.settings.invoice_show_payments and self.invoice.order.payments.filter(
-                    state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED), provider='giftcard'
-            ).exists():
-                giftcard_sum = self.invoice.order.payments.filter(
-                    state__in=(OrderPayment.PAYMENT_STATE_CONFIRMED, OrderPayment.PAYMENT_STATE_REFUNDED),
-                    provider='giftcard'
-                ).aggregate(
-                    s=Sum('amount')
-                )['s'] or Decimal('0.00')
-                tdata.append(
-                    [FontFallbackParagraph(self._normalize(pgettext('invoice', 'Paid by gift card')), self.stylesheet['Normal'])] +
-                    (['', '', ''] if has_taxes else ['']) +
-                    [money_filter(giftcard_sum, self.invoice.event.currency)]
-                )
-                tdata.append(
-                    [FontFallbackParagraph(self._normalize(pgettext('invoice', 'Remaining amount')), self.stylesheet['Bold'])] +
-                    (['', '', ''] if has_taxes else ['']) +
-                    [money_filter(total - giftcard_sum, self.invoice.event.currency)]
-                )
-                tstyledata += [
-                    ('FONTNAME', (0, len(tdata) - 3), (-1, len(tdata) - 3), self.font_bold),
-                ]
-            elif self.invoice.payment_provider_stamp:
-                pm = PaidMarker(
-                    text=self._normalize(self.invoice.payment_provider_stamp),
-                    color=colors.HexColor(self.event.settings.theme_color_success),
-                    font=self.font_bold,
-                    size=16
-                )
-                tdata[-1][-2] = pm
-
-        table = Table(tdata, colWidths=colwidths, repeatRows=1)
-        table.setStyle(TableStyle(tstyledata))
-        story.append(table)
-
-        story.append(Spacer(1, 10 * mm))
-
-        if request_show_service_date:
-            story.append(FontFallbackParagraph(
-                self._normalize(pgettext('invoice', 'Invoice period: {daterange}').format(daterange=request_show_service_date)),
-                self.stylesheet['Normal']
-            ))
-
-        if self.invoice.payment_provider_text:
-            story.append(FontFallbackParagraph(
-                self._normalize(self.invoice.payment_provider_text),
-                self.stylesheet['Normal']
-            ))
-
-        if self.invoice.payment_provider_text and self.invoice.additional_text:
-            story.append(Spacer(1, 3 * mm))
-
-        if self.invoice.additional_text:
-            story.append(FontFallbackParagraph(
-                self._clean_text(self.invoice.additional_text, tags=['br']),
-                self.stylesheet['Normal']
-            ))
-            story.append(Spacer(1, 5 * mm))
-
-        tstyledata = [
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('LEFTPADDING', (0, 0), (0, -1), 0),
-            ('RIGHTPADDING', (-1, 0), (-1, -1), 0),
-            ('TOPPADDING', (0, 0), (-1, -1), 1),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('FONTNAME', (0, 0), (-1, -1), self.font_regular),
-        ]
-        thead = [
-            FontFallbackParagraph(self._normalize(pgettext('invoice', 'Tax rate')), self.stylesheet['Fineprint']),
-            FontFallbackParagraph(self._normalize(pgettext('invoice', 'Net value')), self.stylesheet['FineprintRight']),
-            FontFallbackParagraph(self._normalize(pgettext('invoice', 'Gross value')), self.stylesheet['FineprintRight']),
-            FontFallbackParagraph(self._normalize(pgettext('invoice', 'Tax')), self.stylesheet['FineprintRight']),
-            ''
-        ]
-        tdata = [thead]
-
-        for idx, gross in grossvalue_map.items():
-            rate, name = idx
-            if rate == 0 and gross == 0:
-                continue
-            tax = taxvalue_map[idx]
-            tdata.append([
-                FontFallbackParagraph(self._normalize(localize(rate) + " % " + name), self.stylesheet['Fineprint']),
-                money_filter(gross - tax, self.invoice.event.currency),
-                money_filter(gross, self.invoice.event.currency),
-                money_filter(tax, self.invoice.event.currency),
-                ''
-            ])
-
-        def fmt(val):
-            try:
-                return money_filter(val, self.invoice.foreign_currency_display)
-            except ValueError:
-                return localize(val) + ' ' + self.invoice.foreign_currency_display
-
-        if any(rate != 0 and gross != 0 for (rate, name), gross in grossvalue_map.items()) and has_taxes:
-            colwidths = [a * doc.width for a in (.25, .15, .15, .15, .3)]
-            table = Table(tdata, colWidths=colwidths, repeatRows=2, hAlign=TA_LEFT)
-            table.setStyle(TableStyle(tstyledata))
-            story.append(Spacer(5 * mm, 5 * mm))
-            story.append(KeepTogether([
-                FontFallbackParagraph(self._normalize(pgettext('invoice', 'Included taxes')), self.stylesheet['FineprintHeading']),
-                table
-            ]))
-
-            if self.invoice.foreign_currency_display and self.invoice.foreign_currency_rate:
-                tdata = [thead]
-
-                for idx, gross in grossvalue_map.items():
-                    rate, name = idx
-                    if rate == 0:
-                        continue
-                    tax = taxvalue_map[idx]
-                    gross = round_decimal(gross * self.invoice.foreign_currency_rate)
-                    tax = round_decimal(tax * self.invoice.foreign_currency_rate)
-                    net = gross - tax
-
-                    tdata.append([
-                        FontFallbackParagraph(self._normalize(localize(rate) + " % " + name), self.stylesheet['Fineprint']),
-                        fmt(net), fmt(gross), fmt(tax), ''
-                    ])
-
-                table = Table(tdata, colWidths=colwidths, repeatRows=2, hAlign=TA_LEFT)
-                table.setStyle(TableStyle(tstyledata))
-
-                story.append(KeepTogether([
-                    Spacer(1, height=2 * mm),
-                    FontFallbackParagraph(
-                        self._normalize(pgettext(
-                            'invoice', 'Using the conversion rate of 1:{rate} as published by the {authority} on '
-                                       '{date}, this corresponds to:'
-                        ).format(rate=localize(self.invoice.foreign_currency_rate),
-                                 authority=SOURCE_NAMES.get(self.invoice.foreign_currency_source, "?"),
-                                 date=date_format(self.invoice.foreign_currency_rate_date, "SHORT_DATE_FORMAT"))),
-                        self.stylesheet['Fineprint']
-                    ),
-                    Spacer(1, height=3 * mm),
-                    table
-                ]))
-        elif self.invoice.foreign_currency_display and self.invoice.foreign_currency_rate:
-            foreign_total = round_decimal(total * self.invoice.foreign_currency_rate)
-            story.append(Spacer(1, 5 * mm))
-            story.append(FontFallbackParagraph(self._normalize(
-                pgettext(
-                    'invoice', 'Using the conversion rate of 1:{rate} as published by the {authority} on '
-                               '{date}, the invoice total corresponds to {total}.'
-                ).format(rate=localize(self.invoice.foreign_currency_rate),
-                         date=date_format(self.invoice.foreign_currency_rate_date, "SHORT_DATE_FORMAT"),
-                         authority=SOURCE_NAMES.get(self.invoice.foreign_currency_source, "?"),
-                         total=fmt(foreign_total))),
-                self.stylesheet['Fineprint']
-            ))
-
+        # Compositor: shared context plus ordered section strategies (gbpatil151/pretix_630#66).
+        ctx = InvoiceStoryContext(self, doc)
+        story: List[Flowable] = []
+        for section in self.invoice_story_strategies:
+            story.extend(section.render(ctx))
         return story
 
 
